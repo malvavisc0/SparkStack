@@ -148,6 +148,9 @@ Cheap routing/triage for agents — use it to decide which tool or model to call
 
 ### Images — `:9196`
 
+Full guide: [docs/image-api.md](docs/image-api.md). The Python client is
+[scripts/flux_client.py](scripts/flux_client.py).
+
 ```bash
 curl -s http://192.168.1.10:9196/v1/images/generations \
   -H 'Content-Type: application/json' \
