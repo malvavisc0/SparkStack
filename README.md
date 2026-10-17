@@ -1,8 +1,9 @@
 # SparkStack
 
-![SparkStack](docs/sparkstack-banner.png)
+![SparkStack — a compact 128 GB AI supercomputer projecting vision, image and audio capabilities](docs/sparkstack-banner.png)
 
-A complete private AI server for the **NVIDIA DGX Spark**. The Spark is the server;
+**Ship intelligence in a 128 GB box — for fun and profit.** A complete private AI
+server for the **NVIDIA DGX Spark**. The Spark is the server;
 everything else on your LAN — agents, apps, other machines — are its clients:
 
 | Port | Endpoint | Serves |
@@ -21,8 +22,10 @@ Prefix any endpoint with your Spark's LAN address — the installer prints it, a
 address stays fixed (set a static DHCP lease so it never surprises you).
 
 What you get: **chat with vision, a decision model, multimodal embeddings, image
-generation, speech-to-text and text-to-speech** on OpenAI-compatible endpoints.
-Your own AI backend with no API bills, no rate limits, no data leaving your LAN.
+generation, speech-to-text and text-to-speech** behind one LAN address. Your own
+AI backend with no API bills, no rate limits, no data leaving your LAN.
+Good for private coding agents, RAG over your own documents and media, local voice
+assistants, batch image generation, and routing/triage inside agent loops.
 
 **Everything runs at once.** The chat model is NVIDIA's own 24 GB build of
 Nemotron-3.5-Bolt-74B — a compressed-and-retrained (quantization-aware
@@ -32,9 +35,12 @@ applications. It beats full-precision models of similar size on agentic benchmar
 by **vLLM** with b12x tensor-core kernels, 262K context and DFlash speculative
 decoding (7 draft tokens). Everything else — decisions, embeddings — runs on
 llama.cpp; images on stable-diffusion.cpp. The whole stack fits in the Spark's
-128 GB unified memory with ~55 GB to spare.
+128 GB unified memory with ~35 GB to spare at idle.
 
 ## Install (on the Spark)
+
+Needs Docker + Compose v2, git and curl, plus ~110 GB free disk (42 GB of models,
+the rest Docker images). `install` checks the tooling and installs `uv` if needed.
 
 1. Clone and configure:
 
@@ -56,16 +62,16 @@ llama.cpp; images on stable-diffusion.cpp. The whole stack fits in the Spark's
    ./sparkstack.sh install
    ```
 
-`install` downloads the models (~50 GB), builds the images (llama.cpp,
+`install` downloads the models (~42 GB), builds the images (llama.cpp,
 stable-diffusion.cpp, and NVIDIA's recipe-pinned vLLM image with b12x kernels)
 for the GB10 GPU, starts everything, and prints the endpoint map — everything
 your clients need. On this box it's `192.168.1.10`; check
-<http://192.168.1.10:9190> (all cards green = healthy). After `up`, run
-`./sparkstack.sh test` — it waits for each service to finish loading, then fires
-a real request per endpoint (a chat completion, an embedding, an actual image,
-a TTS clip) and prints the evidence. The first request on every service pays
-lazy-init costs (CUDA graphs, JIT kernels); `test` absorbs those so real
-traffic starts warm.
+<http://192.168.1.10:9190> (all cards green = healthy). After the first
+`install` or `up`, run `./sparkstack.sh test` — it waits for each service to
+finish loading, then fires a real request per endpoint (a chat completion, an
+embedding, an actual image, a TTS clip) and prints the evidence. The first
+request on every service pays lazy-init costs (CUDA graphs, JIT kernels);
+`test` absorbs those so real traffic starts warm.
 
 All services are up after install — chat, images, speech, embeddings, decisions,
 status and logs, simultaneously. `up` starts everything by default; `down` stops
@@ -78,8 +84,9 @@ it. If you stopped something and want it back:
 
 ## Use it (from any machine on the LAN)
 
-All endpoints are OpenAI-compatible — most agents, frameworks and clients work by
-just changing the base URL to `http://<spark>:91xx`.
+Chat, embeddings, images and TTS are OpenAI-compatible — point any SDK or agent
+at `http://<spark>:91xx` (speech-to-text uses its own multipart `/transcribe`
+route; decisions uses `/v1/systemone`).
 
 ### Chat (vision + text) — `:9193`
 
@@ -92,8 +99,9 @@ curl http://192.168.1.10:9193/v1/chat/completions \
   }'
 ```
 
-Send images by adding an `image_url` content part. 256K context, tool calling
-and reasoning follow the model's chat template.
+Send images by adding an `image_url` content part. 262K context, tool calling
+and reasoning follow the model's chat template. With the OpenAI SDK, set
+`base_url="http://<spark>:9193/v1"`; the API key is ignored.
 
 ### Speech-to-text — `:9191`
 
@@ -180,7 +188,7 @@ poll `/sdcpp/v1/jobs/{id}`) unlocks everything the OpenAI route doesn't:
 
 ```bash
 # two-pass generation: 1024 base → 1.5x latent upscale → 8-step refine
-# (~36 s total for a 1536² image; direct 2048 is ~59 s and softer)
+# (~36 s total for a 1536² image; direct 2048 is ~52 s and softer)
 curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "a red fox in a snowy forest, evening light",
@@ -201,6 +209,8 @@ curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
   Red means "not running or unhealthy"; an on-demand profile that isn't started
   shows red.
 - **<http://192.168.1.10:9197>** — Dozzle: live logs of every container, searchable.
+  It also exposes an MCP endpoint at `/api/mcp` so agents can query the logs
+  directly (requires the MCP initialize handshake).
 
 ## Operate it
 
@@ -208,6 +218,7 @@ Everything goes through one script:
 
 | Command | What it does |
 |---|---|
+| `./sparkstack.sh install` | first-time setup: models, images, start, endpoint map |
 | `./sparkstack.sh up [profiles]` | start services (default: the whole stack) |
 | `./sparkstack.sh down` | stop the stack |
 | `./sparkstack.sh test` | wait for loads, fire a real request per endpoint, print the evidence |
@@ -224,7 +235,7 @@ All profiles run at once: `audio`, `utility`, `status` (small, always-on) plus
 for manual downloads: `docker compose --profile tools run --rm tools …`.
 
 **Watchdog, one-time setup** — on unified memory an overrun doesn't error, it
-freezes the machine. Normally idle (~55 GB headroom); if free memory ever drops
+freezes the machine. Normally idle (~35 GB available); if available memory drops
 below 3 GiB it stops `vision` first, then `llm`, leaving the small services alone:
 
 ```bash
@@ -236,10 +247,10 @@ sudo systemctl enable --now watchdog.timer
 ## Reference
 
 **Hardware**: designed and budgeted for the DGX Spark (GB10, 128 GB unified
-memory, `sm_121`). Chat at NVIDIA's native 2-bit (24 GB build), everything else
-Q8_0 → ~60 GiB resident, ~55 GiB headroom.
+memory, `sm_121`). Chat at NVIDIA's native 2-bit (24 GB build), the rest
+quantized or FP16 → ~85 GiB resident at idle, ~35 GiB available.
 
-**Layout**: `models/` (weights, ~96 GB, git-ignored — includes `flux3/loras/`
+**Layout**: `models/` (weights, ~42 GB, git-ignored — includes `flux3/loras/`
 and `flux3/upscalers/` add-on dirs, scanned live) · `data/` (whisper cache +
 watchdog log, git-ignored) · `config/` (dashboards, TTS server + voices,
 diffusion presets, committed) · `.env` (your token, git-ignored).
@@ -264,4 +275,4 @@ port-forward the 919x block.
   update the `FROM` digest in `Dockerfile` (marked with a comment).
 - TTS 503 — model still loading; watch the status card turn green.
 - Card red on :9190 — service down, or its profile isn't started (expected for `llm`/`vision` unless you started them).
-- Machine feels starved during a 4K image run — the watchdog stops `vision` automatically below 3 GiB free; check `data/watchdog.log`.
+- Machine feels starved during a 4K image run — the watchdog stops `vision` automatically below 3 GiB available; check `data/watchdog.log`.
