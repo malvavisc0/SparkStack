@@ -4,13 +4,17 @@ The `image-flux3` service runs FLUX.3 Image Klein on port `:9196`. It serves the
 OpenAI image routes for normal work and a native async API for hires passes,
 exact seeds and sampler control. Both routes use the same model and the same
 defaults: 8 steps, `dpm++2m` with the `karras` scheduler, and strength 0.9 for
-edits. A 1024x1024 generation takes about 11 s on the Spark; a 1536x1536 hires
-render takes about 36 s.
+edits. A 1024x1024 render takes about 11 s, plus about 1 s for prompt expansion;
+a 1536x1536 hires render takes about 36 s plus prompt expansion.
 
 ## Quick start
 
 `scripts/flux_client.py` is a command line client built on the Python standard
 library. It needs Python 3.10 or newer and no packages.
+
+The client always expands the prompt through the local chat model before it
+renders. That step needs the `llm` profile, and there is no flag to skip it. Use
+`--show-prompt` to see the caption that was sent.
 
 ```bash
 ./scripts/flux_client.py generate "a red fox in a snowy forest, evening light" --out fox.png
@@ -18,26 +22,42 @@ library. It needs Python 3.10 or newer and no packages.
 ./scripts/flux_client.py hires "a red fox in a snowy forest, evening light" --scale 1.5 --out fox-large.png
 ```
 
-The client talks to `http://localhost:9196` by default. Point it at another host
-with `--api` or the `SPARKSTACK_IMAGE_URL` environment variable:
+The client talks to the image service at `http://localhost:9196` and the chat
+service at `http://localhost:9193` by default. Point it at another host with
+`--api` and `--chat-api`, or with the `SPARKSTACK_IMAGE_URL` and
+`SPARKSTACK_CHAT_URL` environment variables:
 
 ```bash
 ./scripts/flux_client.py generate "a red fox in a snowy forest" \
-  --api http://192.168.1.10:9196 --out fox.png
+  --api http://192.168.1.10:9196 --chat-api http://192.168.1.10:9193 \
+  --out fox.png
 ```
 
 It prints the output path, the image dimensions and the time the job took. Add
 `--seed` to make a result repeatable.
 
+## Prompt expansion
+
+The model expects a full scene caption. The client sends the request through the
+chat model with the templates in `config/image/`, adapted from BFL's FLUX.3
+prompt upsampler, then renders the returned caption. Edits use the first image
+as context for the expansion. Multi-reference edits still send every reference
+to the image model, but the caption writer sees only the first one.
+
+Direct API calls bypass this step. If you call the OpenAI or native route
+without the client, send a full caption instead of a short request.
+
 ## Generate
 
 The OpenAI route is the shortest path for simple integrations. It returns JSON,
-not image bytes, so decode `data[0].b64_json` before writing the file:
+not image bytes, so decode `data[0].b64_json` before writing the file. The raw
+route does not expand prompts; the example uses a caption rather than a short
+request:
 
 ```bash
 curl -s http://192.168.1.10:9196/v1/images/generations \
   -H 'Content-Type: application/json' \
-  -d '{"prompt": "a red fox in a snowy forest, evening light", "size": "1024x1024"}' \
+  -d '{"prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, its orange fur catching the last light, dark evergreens behind it and soft snow in the foreground.", "size": "1024x1024"}' \
   | python3 -c 'import json,sys,base64; open("fox.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
 ```
 
@@ -61,7 +81,8 @@ change several settings.
 `POST /v1/images/edits` uses multipart form data. Send one or more `image`
 fields. The first image becomes the img2img init image, and every image is
 passed to the model as a reference. The prompt should describe the finished
-scene, not only the change.
+scene, not only the change. The Python client expands the instruction first,
+using the first image as context.
 
 ```bash
 curl -s http://192.168.1.10:9196/v1/images/edits \
@@ -95,7 +116,7 @@ Submit a job to `POST /sdcpp/v1/img_gen`:
 curl -s http://192.168.1.10:9196/sdcpp/v1/img_gen \
   -H 'Content-Type: application/json' \
   -d '{
-    "prompt": "a red fox in a snowy forest, evening light",
+    "prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, orange fur catching the last light, dark evergreens behind it.",
     "width": 1024,
     "height": 1024,
     "sample_params": {"sample_steps": 8, "sample_method": "dpm++2m", "scheduler": "karras", "seed": 42}
@@ -125,7 +146,7 @@ the base image; the second pass upscales it and repaints at the target scale.
 
 ```json
 {
-  "prompt": "a red fox in a snowy forest, evening light",
+  "prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, orange fur catching the last light, dark evergreens behind it.",
   "width": 1024,
   "height": 1024,
   "hires": {
@@ -154,7 +175,8 @@ Measured on the Spark with the server defaults:
 | 2048x2048 direct | ~52 s |
 | 512x512 edit | ~5 s |
 
-Timings vary with prompt length, queue depth and the desktop's other work.
+These are render times. The client adds about 1 s for prompt expansion. Timings
+vary with prompt length, queue depth and the desktop's other work.
 
 ## Sampling settings
 
@@ -168,7 +190,7 @@ only when you want a smoother result.
 
 | Field | What it does |
 |---|---|
-| `prompt` | The scene to draw. Natural language works better than tag lists. |
+| `prompt` | The scene to draw. The client expands it into a caption first. |
 | `negative_prompt` | Things to avoid, such as `text, letters, words, logos`. |
 | `width`, `height` | Output size. 1024x1024 is the native size. |
 | `sample_params.sample_steps` | Sampling steps. The service default is 8. |
@@ -193,8 +215,9 @@ Put ESRGAN-family models in `models/flux3/upscalers` and name one in
 
 - A JSON response with no image means the request failed. Print the full body
   and check `error`.
-- Connection refused means the service is not running. Start the vision profile
-  with `./sparkstack.sh up vision` and check the card at `:9190`.
+- Connection refused means a service is not running. Start the vision profile
+  with `./sparkstack.sh up vision`, and the LLM profile with
+  `./sparkstack.sh up llm` for prompt expansion. Check the cards at `:9190`.
 - A native job that stays queued is waiting behind another render. Poll the job
   id and check `./sparkstack.sh logs image-flux3`.
 - An edit that returns an unrecognizable subject usually had too much strength.
@@ -213,9 +236,10 @@ the full flag list.
 | `edit` | Image to image. Pass the init image first, then any references. Accepts `--strength`, `--width` and `--height`. |
 | `hires` | Two-pass render. Accepts `--scale`, `--denoise`, `--hires-steps`, `--upscaler`, `--width` and `--height`. |
 
-All three accept `--api`, `--timeout`, `--seed`, `--steps`, `--sampler`,
-`--scheduler`, `--negative` and `--out`. `edit` uses the first image's
-dimensions unless you pass `--width` and `--height`.
+All three accept `--api`, `--chat-api`, `--upsample-model`, `--show-prompt`,
+`--timeout`, `--seed`, `--steps`, `--sampler`, `--scheduler`, `--negative` and
+`--out`. `edit` uses the first image's dimensions unless you pass `--width` and
+`--height`.
 
 The service definition lives in `docker-compose.yaml`. Stack setup and
 monitoring are covered in the [README](../README.md).

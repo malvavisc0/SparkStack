@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Generate, edit and upscale images with the SparkStack FLUX.3 service."""
+"""Generate, edit and upscale images with mandatory prompt expansion."""
 
 import argparse
 import base64
 import json
 import os
 import struct
+import sys
 import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from client_support import fail, request_json
+from client_support import fail, image_part, request_json
 
 DEFAULT_API = os.environ.get("SPARKSTACK_IMAGE_URL", "http://localhost:9196")
+DEFAULT_CHAT_API = os.environ.get("SPARKSTACK_CHAT_URL", "http://localhost:9193")
 
 
 def wait_for_job(
@@ -85,6 +87,56 @@ def default_out(command: str) -> Path:
     return Path(f"flux-{command}-{stamp}.png")
 
 
+def load_prompt(kind: str) -> str:
+    """Read a prompt template from the config directory."""
+    path = (
+        Path(__file__).resolve().parent.parent / "config" / "image" / f"prompt_{kind}.txt"
+    )
+    try:
+        text = path.read_text()
+    except OSError as error:
+        fail(f"cannot read {path}: {error}")
+    if not text.strip():
+        fail(f"empty prompt template: {path}")
+    return text.strip()
+
+
+def upsample_prompt(
+    args: argparse.Namespace,
+    prompt: str,
+    images: list[Path],
+) -> str:
+    """Expand a request into a full caption with the local chat model."""
+    kind = "i2i" if images else "t2i"
+    user: Any = prompt
+    if kind == "t2i":
+        user = f"TARGET CANVAS: {args.width}:{args.height}\n{prompt}"
+    else:
+        user = [{"type": "text", "text": prompt}, image_part(images[0])]
+    payload: dict[str, Any] = {
+        "model": args.upsample_model,
+        "messages": [
+            {"role": "system", "content": load_prompt(kind)},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0,
+        "max_tokens": 1200,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    response: dict[str, Any] = request_json(
+        args.chat_api.rstrip("/") + "/v1/chat/completions",
+        payload=payload,
+        timeout=args.timeout,
+    )
+    content = response["choices"][0]["message"].get("content")
+    if not isinstance(content, str) or not content.strip():
+        fail("prompt upsampler returned an empty caption")
+    caption = content.strip()
+    if args.show_prompt:
+        print(f"upsampled prompt: {caption}", file=sys.stderr)
+    return caption
+
+
 def sample_settings(args: argparse.Namespace) -> dict[str, Any]:
     """Build the optional sample settings."""
     settings: dict[str, Any] = {}
@@ -101,12 +153,13 @@ def sample_settings(args: argparse.Namespace) -> dict[str, Any]:
 
 def build_payload(
     args: argparse.Namespace,
+    prompt: str,
     width: int,
     height: int,
 ) -> dict[str, Any]:
     """Build a native image request."""
     payload: dict[str, Any] = {
-        "prompt": args.prompt,
+        "prompt": prompt,
         "width": width,
         "height": height,
     }
@@ -139,15 +192,17 @@ def run_job(args: argparse.Namespace, payload: dict[str, Any]) -> None:
 
 def cmd_generate(args: argparse.Namespace) -> None:
     """Run a text-to-image job."""
-    run_job(args, build_payload(args, args.width, args.height))
+    prompt = upsample_prompt(args, args.prompt, [])
+    run_job(args, build_payload(args, prompt, args.width, args.height))
 
 
 def cmd_edit(args: argparse.Namespace) -> None:
     """Run an image-to-image job."""
+    prompt = upsample_prompt(args, args.prompt, [args.images[0]])
     size = image_size(args.images[0])
     width = args.width or (size[0] if size else 1024)
     height = args.height or (size[1] if size else 1024)
-    payload = build_payload(args, width, height)
+    payload = build_payload(args, prompt, width, height)
     encoded = [
         base64.b64encode(path.read_bytes()).decode("ascii") for path in args.images
     ]
@@ -160,7 +215,8 @@ def cmd_edit(args: argparse.Namespace) -> None:
 
 def cmd_hires(args: argparse.Namespace) -> None:
     """Run a two-pass hires job."""
-    payload = build_payload(args, args.width, args.height)
+    prompt = upsample_prompt(args, args.prompt, [])
+    payload = build_payload(args, prompt, args.width, args.height)
     payload["hires"] = {
         "enabled": True,
         "upscaler": args.upscaler,
@@ -174,7 +230,22 @@ def cmd_hires(args: argparse.Namespace) -> None:
 def add_common(parser: argparse.ArgumentParser) -> None:
     """Add options shared by all image commands."""
     parser.add_argument("prompt", help="what the image should show")
-    parser.add_argument("--api", default=DEFAULT_API, help="service base URL")
+    parser.add_argument("--api", default=DEFAULT_API, help="image service base URL")
+    parser.add_argument(
+        "--chat-api",
+        default=DEFAULT_CHAT_API,
+        help="prompt upsampler base URL",
+    )
+    parser.add_argument(
+        "--upsample-model",
+        default="nemotron-3.5-bolt",
+        help="model used to expand the prompt",
+    )
+    parser.add_argument(
+        "--show-prompt",
+        action="store_true",
+        help="print the upsampled prompt to stderr",
+    )
     parser.add_argument("--negative", default="", help="things to avoid")
     parser.add_argument(
         "--steps",

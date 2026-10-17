@@ -21,6 +21,8 @@ Prefix any endpoint with your Spark's LAN address — the installer prints it, a
 `./sparkstack.sh server` prints the full endpoint map anytime. On this network the
 address stays fixed (set a static DHCP lease so it never surprises you).
 
+Service guides and Python clients are indexed in [docs/README.md](docs/README.md).
+
 What you get: **chat with vision, a decision model, multimodal embeddings, image
 generation, speech-to-text and text-to-speech** behind one LAN address. Your own
 AI backend with no API bills, no rate limits, no data leaving your LAN.
@@ -166,10 +168,14 @@ Cheap routing/triage for agents — use it to decide which tool or model to call
 Full guide: [docs/image-api.md](docs/image-api.md). The Python client is
 [scripts/flux_client.py](scripts/flux_client.py).
 
+The client always expands the prompt through the chat model before rendering,
+so it needs the `llm` profile. The raw API takes prompts as sent and expects a
+full scene caption, not a short request.
+
 ```bash
 curl -s http://192.168.1.10:9196/v1/images/generations \
   -H 'Content-Type: application/json' \
-  -d '{"prompt": "a red fox in a snowy forest, evening light"}' \
+  -d '{"prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, its orange fur catching the last light, dark evergreens behind it and soft snow in the foreground."}' \
   | python3 -c 'import json,sys,base64; open("fox.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
 ```
 
@@ -271,7 +277,8 @@ quantized or FP16 → ~85 GiB resident at idle, ~35 GiB available.
 **Layout**: `models/` (weights, ~42 GB, git-ignored — includes `flux3/loras/`
 and `flux3/upscalers/` add-on dirs, scanned live) · `data/` (whisper cache +
 watchdog log, git-ignored) · `config/` (dashboards, TTS server + voices,
-diffusion presets, committed) · `.env` (your token, git-ignored).
+diffusion presets, prompt templates, committed) · `.env` (your token,
+git-ignored).
 
 **Security**: no auth anywhere — it's for a trusted LAN. Anyone who can reach the
 host can call every model; Dozzle mounts `docker.sock` and runs with
