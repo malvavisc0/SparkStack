@@ -1,0 +1,222 @@
+name: sparkstack
+
+networks:
+  sparkstack: {}
+
+volumes:
+  dozzle_data: {}
+
+x-gpu: &gpu
+  # Every GPU service merges this anchor; dozzle does not. The label feeds
+  # dozzle's DOZZLE_FILTER (label=sparkstack), so dozzle hides itself while
+  # showing every stack service — this engine's filters have no negation.
+  labels: ["sparkstack=true"]
+  deploy:
+    resources:
+      reservations:
+        devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+
+x-llama-service: &llama-service
+  build:
+    context: .
+    target: llama-runtime
+    args: { CUDA_ARCH: 121a-real, LLAMA_REF: "${LLAMA_REF:-master}" }
+  volumes: ["./models:/models:ro"]
+  networks: [sparkstack]
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 300s
+  restart: unless-stopped
+  <<: *gpu
+
+services:
+  llm-nemotron:
+    profiles: ["llm"]
+    # NVIDIA's vLLM recipe for the 24GB build (same QAD weights as the GGUF, but
+    # b12x tensor-core kernels and 262K context). Serves fully from local files.
+    build: { context: ., target: vllm-runtime }
+    command: >
+      /models/nemotron-vllm
+      --served-model-name nemotron-3.5-bolt
+      --port 8080
+      --trust-remote-code
+      --load-format auto
+      --tensor-parallel-size 1
+      --max-model-len 262144
+      --max-num-seqs 1
+      --enable-chunked-prefill
+      --gpu-memory-utilization 0.33
+      --kv-cache-dtype fp8
+      --linear-backend b12x
+      --moe-backend b12x
+      --attention-backend FLASHINFER
+      --mamba-backend flashinfer
+      --mamba-ssm-cache-dtype bfloat16
+      --mamba-cache-dtype bfloat16
+      --mamba-cache-mode align
+      --seed 42
+      --limit-mm-per-prompt '{"video":1,"image":1}'
+      --video-pruning-rate 0.5
+      --media-io-kwargs '{"video":{"fps":2,"num_frames":256}}'
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --reasoning-parser-plugin /app/ultra_v3_reasoning_parser.py
+      --reasoning-parser ultra_v3
+      --speculative-config '{"method":"dflash","model":"/models/nemotron-vllm-lilicorr","num_speculative_tokens":7,"rejection_sample_method":"standard","attention_backend":"FLASHINFER","draft_load_config":{"load_format":"auto"}}'
+    ports: ["9193:8080"]
+    volumes: ["./models:/models:ro"]
+    networks: [sparkstack]
+    ipc: host
+    healthcheck:                   # vllm serves /health once ready; image has no curl
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s           # vLLM cold load takes minutes
+    restart: unless-stopped
+    <<: *gpu
+
+  d1-decide:
+    profiles: ["utility"]
+    <<: *llama-service
+    command: >
+      llama-server
+      -m /models/d1-3B/d1-3B-Q8_0.gguf
+      --mmproj /models/d1-3B/mmproj-d1-3B-Q8_0.gguf
+      --host 0.0.0.0 --port 8080 -ngl 999 -c 32768
+    ports: ["9194:8080"]
+
+  embeddings:
+    profiles: ["utility"]
+    <<: *llama-service
+    command: >
+      llama-server
+      -m /models/embeddinggemma-2/embeddinggemma-2-Q8_0.gguf
+      --mmproj /models/embeddinggemma-2/mmproj-Q8_0.gguf
+      --embedding --pooling mean
+      --host 0.0.0.0 --port 8080 -ngl 999 -c 8192 --alias embeddinggemma-2
+    ports: ["9195:8080"]
+
+  image-flux3:
+    profiles: ["vision"]
+    build:
+      context: .
+      target: sd-runtime
+      args: { CUDA_ARCH: 121a-real, SD_REF: "${SD_REF:-master}" }
+    command: >
+      sd-server
+      --listen-ip 0.0.0.0 --listen-port 8080
+      --diffusion-model /models/flux3/flux-3-image-klein-Q8_0.gguf
+      --llm /models/flux3/Qwen3VL-4B-Instruct-Q8_0.gguf
+      --vae /models/flux3/ae.safetensors
+      --lora-model-dir /models/flux3/loras
+      --hires-upscalers-dir /models/flux3/upscalers
+      --steps 16 --cfg-scale 1.0
+      --diffusion-fa --flash-attn on --sage-attn --cache-mode easycache
+    ports: ["9196:8080"]
+    volumes: ["./models:/models:ro"]
+    networks: [sparkstack]
+    healthcheck:
+      # sd-server serves its embedded web UI at "/" — the only guaranteed-200 route;
+      # it has no /health endpoint
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+    <<: *gpu
+
+  whisper-x:
+    image: mekopa/whisperx-blackwell:latest
+    profiles: ["audio"]
+    networks: [sparkstack]
+    restart: unless-stopped
+    ports: ["9191:8003/tcp"]
+    environment:
+      HF_TOKEN: ${HF_TOKEN:?set HF_TOKEN in .env}
+      MODEL_NAME: large-v3-turbo
+      DEVICE: cuda
+      COMPUTE_TYPE: float16
+      HF_HOME: /root/.cache/huggingface
+    volumes:
+      - ./data/whisper-data:/root/.cache/huggingface
+      - ./data/whisper-data/torch:/root/.cache/torch
+    <<: *gpu
+
+  tts-voicedesign:
+    image: martinb78/faster-qwen3-tts-dgx-spark:latest
+    profiles: ["audio"]
+    networks: [sparkstack]
+    restart: unless-stopped
+    ports: ["9192:8000"]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - ./models/tts/Qwen3-TTS-VoiceDesign:/models/Qwen3-TTS-VoiceDesign:ro
+      - ./config/tts:/config:rw
+    # image has no entrypoint, so no bash -c wrapper needed
+    command:
+      - python3
+      - /config/run_voicedesign_server.py
+      - --model
+      - /models/Qwen3-TTS-VoiceDesign
+      - --voices
+      - /config/voicedesign_voices.json
+      - --port
+      - "8000"
+      - --max-seq-len
+      - "2048"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    <<: *gpu
+
+  status:
+    # no shell in the gatus image → no CMD healthcheck; the dashboard's own cards
+    # show every service's health, so gatus-health-via-gatus would be circular
+    image: twinproduction/gatus:stable
+    profiles: ["status"]
+    labels: ["sparkstack=true"]   # visible in dozzle (see x-gpu note)
+    networks: [sparkstack]
+    ports: ["9190:8080"]
+    volumes: ["./config/gatus/config.yaml:/config/config.yaml:ro"]
+    restart: unless-stopped
+
+  dozzle:               # live container logs, profile: status
+    image: amir20/dozzle:latest
+    profiles: ["status"]
+    networks: [sparkstack]
+    ports: ["9197:8080"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro   # read-only; see security note in README
+      - dozzle_data:/data                             # settings survive restarts
+    environment:
+      - DOZZLE_HOSTNAME=SparkStack
+      - DOZZLE_FILTER=label=sparkstack   # show stack services only — hides dozzle itself
+    healthcheck:
+      test: ["CMD", "/dozzle", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  tools:
+    profiles: ["tools"]
+    labels: ["sparkstack=true"]   # visible in dozzle (see x-gpu note)
+    build:
+      context: .
+      target: tools-runtime
+      args: { CUDA_ARCH: 121a-real, LLAMA_REF: "${LLAMA_REF:-master}" }
+    networks: [sparkstack]
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes: ["./models:/models"]
+    entrypoint: ["/bin/sh", "-lc"]

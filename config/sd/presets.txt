@@ -1,0 +1,19 @@
+# Reference generation settings (used in the image-flux3 command / sd-cli calls).
+
+# FLUX.3 Image Klein (distilled) — DEFAULT
+#   sd-server ... --diffusion-model flux-3-image-klein-Q8_0.gguf \
+#                 --llm Qwen3VL-4B-Instruct-Q8_0.gguf \
+#                 --vae flux2_ae.safetensors
+#   steps 16   cfg-scale 1.0   sampling-method euler   flow-shift 6.93 (default)
+#   add: --sage-attn --flash-attn on --cache-mode easycache
+
+# FLUX.3 Image Klein Base — more diversity
+#   steps 20   cfg-scale 3.5   sampling-method euler
+
+# Qwen-Image-2.1 (alternate) — same runtime, different artefacts
+#   --diffusion-model qwen-image-2.1-Q4_K_M.gguf \
+#   --llm Qwen3-VL-8B-Instruct-UD-Q4_K_XL.gguf \
+#   --vae qwen_image_2.1_vae_bf16.safetensors
+#   steps 20   cfg-scale 6.0   sampling-method euler
+
+# Reference images (editing): repeat -r up to 10 times for FLUX.3 multi-reference.

@@ -1,0 +1,58 @@
+# Gatus status page. Reaches each service by its compose DNS name on the `sparkstack`
+# network. A card shows red whenever its profile simply isn't started — so this reflects
+# "running and healthy", not "broken".
+#
+# No `storage` block: results are kept in memory and reset when the container restarts —
+# deliberate, this is a live dashboard, not an SLA history. To persist, add:
+#   storage: { type: sqlite, path: /data/data.db }  (+ a volume for /data)
+endpoints:
+  - name: Nemotron-3.5-Bolt
+    group: apis
+    url: "http://llm-nemotron:8080/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: d1-3B
+    group: apis
+    url: "http://d1-decide:8080/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: embeddings
+    group: apis
+    url: "http://embeddings:8080/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: FLUX.3 image
+    group: apis
+    # sd-server has no /health; its embedded web UI at "/" is the only guaranteed-200 route
+    url: "http://image-flux3:8080/"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: WhisperX
+    group: apis
+    url: "http://whisper-x:8003/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: Qwen3-TTS
+    group: apis
+    url: "http://tts-voicedesign:8000/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: Dozzle
+    group: status
+    # Dozzle's own /healthcheck route (same one its Docker healthcheck uses)
+    url: "http://dozzle:8080/healthcheck"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]

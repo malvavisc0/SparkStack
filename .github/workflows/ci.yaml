@@ -1,0 +1,24 @@
+# SparkStack lint/validate CI. Mirrors the local commands:
+#   uvx ruff check --line-length 100 config scripts
+#   docker compose config -q
+#   bash -n sparkstack.sh scripts/watchdog.sh
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          version: latest
+      - run: ruff check --line-length 100 config scripts
+      - run: docker compose -f docker-compose.yaml --profile llm --profile vision
+             --profile audio --profile utility --profile status --profile tools config --quiet
+        env:
+          HF_TOKEN: ci-placeholder
+      - run: bash -n sparkstack.sh scripts/watchdog.sh

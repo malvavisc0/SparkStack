@@ -1,0 +1,7 @@
+.env
+models/
+data/
+vendor/
+.ruff_cache/
+__pycache__/
+*.log

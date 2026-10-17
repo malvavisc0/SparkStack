@@ -1,0 +1,13 @@
+[Unit]
+Description=SparkStack host memory watchdog
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+# Point SPARKSTACK_DIR at the absolute path of this repo. Override it in
+# /etc/default/sparkstack, e.g.:
+#   SPARKSTACK_DIR=/home/you/Projects/SparkStack
+Environment=SPARKSTACK_DIR=/opt/sparkstack
+EnvironmentFile=-/etc/default/sparkstack
+ExecStart=/bin/bash ${SPARKSTACK_DIR}/scripts/watchdog.sh
