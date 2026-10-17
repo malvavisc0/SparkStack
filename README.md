@@ -220,8 +220,12 @@ watchdog log, git-ignored) · `config/` (dashboards, TTS server + voices,
 diffusion presets, committed) · `.env` (your token, git-ignored).
 
 **Security**: no auth anywhere — it's for a trusted LAN. Anyone who can reach the
-host can call every model; Dozzle additionally mounts `docker.sock` read-only.
-Keep the box private or behind a VPN. Don't port-forward the 919x block.
+host can call every model; Dozzle mounts `docker.sock` and runs with
+`DOZZLE_ENABLE_ACTIONS` + `DOZZLE_ENABLE_SHELL`, so it can start/stop containers
+and `exec` a shell into them from the UI (the `:ro` on the socket mount is
+cosmetic — it does not block API writes). Anyone who can reach Dozzle has the
+same power as root on this host. Keep the box private or behind a VPN. Don't
+port-forward the 919x block.
 
 **Troubleshooting**
 

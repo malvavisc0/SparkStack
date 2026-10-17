@@ -200,6 +200,10 @@ services:
     environment:
       - DOZZLE_HOSTNAME=SparkStack
       - DOZZLE_FILTER=label=sparkstack   # show stack services only — hides dozzle itself
+      - DOZZLE_ENABLE_ACTIONS=true       # start/stop/restart/update from the UI
+      - DOZZLE_ENABLE_SHELL=true         # docker exec into containers from the UI; trusted LAN only
+      - DOZZLE_ENABLE_MCP=true           # read-only MCP endpoint at http://<host>:9197/api/mcp
+      - DOZZLE_NO_ANALYTICS=true         # no outbound telemetry
     healthcheck:
       test: ["CMD", "/dozzle", "healthcheck"]
       interval: 30s
