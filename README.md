@@ -141,14 +141,30 @@ Cheap routing/triage for agents — use it to decide which tool or model to call
 ### Images — `:9196`
 
 ```bash
-curl http://192.168.1.10:9196/v1/images/generations \
+curl -s http://192.168.1.10:9196/v1/images/generations \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "a red fox in a snowy forest, evening light"}' \
-  --output fox.png
+  | python3 -c 'import json,sys,base64; open("fox.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
 ```
 
-`POST /v1/images/edits` for editing with reference images (up to 10). FLUX.3
-Image Klein at Q8_0: native 4K, 16 steps, tuned defaults — no parameters needed.
+**Editing** — `POST /v1/images/edits` (multipart) takes one or more `image`
+fields. The first becomes the img2img init image (EDIT mode); all of them are
+passed to FLUX.3 as references (up to 10). The route hides `strength` and
+defaults to 0.75, which only partially repaints a large subject — set 0.9 for
+object-level edits:
+
+```bash
+curl -s http://192.168.1.10:9196/v1/images/edits \
+  -F 'prompt=change the mug to bright blue, keep everything else the same <sd_cpp_extra_args>{"strength":0.9}</sd_cpp_extra_args>' \
+  -F image=@mug.png \
+  | python3 -c 'import json,sys,base64; open("mug-blue.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
+```
+
+The native async API takes `strength` directly and is the better path for
+scripted edits. Caveat: FLUX.3 Klein is img2img + multi-reference conditioning.
+`ref_images` alone reproduces the reference rather than editing it, and masked
+inpaint is unreliable — prompt-driven img2img is the working edit path.
+
 sd-server also serves a web UI at `:9196` for interactive use.
 
 **High-res and add-ons** — the native async API (`POST /sdcpp/v1/img_gen`,

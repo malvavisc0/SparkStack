@@ -17,3 +17,10 @@
 #   steps 20   cfg-scale 6.0   sampling-method euler
 
 # Reference images (editing): repeat -r up to 10 times for FLUX.3 multi-reference.
+
+# Editing (img2img): POST /v1/images/edits uses strength 0.75 by default, which
+#   under-edits large subjects. Set 0.9 via the prompt:
+#     <sd_cpp_extra_args>{"strength":0.9}</sd_cpp_extra_args>
+#   Native API: {"init_image": ..., "strength": 0.9}. FLUX.3 Klein is img2img +
+#   multi-reference conditioning, not an instruction editor: ref_images alone
+#   reproduces the reference, and masked inpaint is unreliable.
