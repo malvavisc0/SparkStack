@@ -147,23 +147,31 @@ curl -s http://192.168.1.10:9196/v1/images/generations \
   | python3 -c 'import json,sys,base64; open("fox.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
 ```
 
+The service defaults are tuned for the distilled model: 8 steps with
+`dpm++2m` + `karras`, about 11 s per 1024² image. More steps only smooth the
+result here. Override per request with
+`<sd_cpp_extra_args>{"sample_params":{"sample_steps":16}}</sd_cpp_extra_args>`
+(or `sample_params` on the native API).
+
 **Editing** — `POST /v1/images/edits` (multipart) takes one or more `image`
 fields. The first becomes the img2img init image (EDIT mode); all of them are
-passed to FLUX.3 as references (up to 10). The route hides `strength` and
-defaults to 0.75, which only partially repaints a large subject — set 0.9 for
-object-level edits:
+passed to FLUX.3 as references (up to 10). The service starts with
+`--strength 0.9` (see `docker-compose.yaml`) because upstream's 0.75 default
+under-edits large subjects. Override per request with
+`<sd_cpp_extra_args>{"strength":0.6}</sd_cpp_extra_args>` in the prompt for a
+subtler change:
 
 ```bash
 curl -s http://192.168.1.10:9196/v1/images/edits \
-  -F 'prompt=change the mug to bright blue, keep everything else the same <sd_cpp_extra_args>{"strength":0.9}</sd_cpp_extra_args>' \
+  -F 'prompt=change the mug to bright blue, keep everything else the same' \
   -F image=@mug.png \
   | python3 -c 'import json,sys,base64; open("mug-blue.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
 ```
 
-The native async API takes `strength` directly and is the better path for
-scripted edits. Caveat: FLUX.3 Klein is img2img + multi-reference conditioning.
-`ref_images` alone reproduces the reference rather than editing it, and masked
-inpaint is unreliable — prompt-driven img2img is the working edit path.
+The native async API also takes `strength` directly, per request. Caveat:
+FLUX.3 Klein is img2img + multi-reference conditioning. `ref_images` alone
+reproduces the reference rather than editing it, and masked inpaint is
+unreliable — prompt-driven img2img is the working edit path.
 
 sd-server also serves a web UI at `:9196` for interactive use.
 
@@ -171,13 +179,14 @@ sd-server also serves a web UI at `:9196` for interactive use.
 poll `/sdcpp/v1/jobs/{id}`) unlocks everything the OpenAI route doesn't:
 
 ```bash
-# two-pass generation: 768 base → 2x latent upscale → 8-step refine (~25 s)
+# two-pass generation: 1024 base → 1.5x latent upscale → 8-step refine
+# (~36 s total for a 1536² image; direct 2048 is ~59 s and softer)
 curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "a red fox in a snowy forest, evening light",
-       "width": 768, "height": 768,
+       "width": 1024, "height": 1024,
        "hires": {"enabled": true, "upscaler": "Latent (nearest-exact)",
-                  "scale": 2.0, "denoising_strength": 0.55, "steps": 8}}'
+                  "scale": 1.5, "denoising_strength": 0.45, "steps": 8}}'
 ```
 
 - **LoRA**: drop FLUX-compatible LoRA files in `models/flux3/loras/` — they

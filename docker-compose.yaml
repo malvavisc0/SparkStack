@@ -106,6 +106,10 @@ services:
       context: .
       target: sd-runtime
       args: { CUDA_ARCH: 121a-real, SD_REF: "${SD_REF:-master}" }
+    # --strength 0.9: the 0.75 default under-edits when an init image is present.
+    # Only used for edits/img2img; text-to-image ignores it.
+    # 8 steps: this distilled model gains texture up to ~8 steps; 16+ only smooths it.
+    # dpm++2m + karras: measurably more glaze/edge detail than euler (same runtime).
     command: >
       sd-server
       --listen-ip 0.0.0.0 --listen-port 8080
@@ -114,7 +118,8 @@ services:
       --vae /models/flux3/ae.safetensors
       --lora-model-dir /models/flux3/loras
       --hires-upscalers-dir /models/flux3/upscalers
-      --steps 16 --cfg-scale 1.0
+      --steps 8 --cfg-scale 1.0 --strength 0.9
+      --sampling-method dpm++2m --scheduler karras
       --diffusion-fa --flash-attn on --sage-attn --cache-mode easycache
     ports: ["9196:8080"]
     volumes: ["./models:/models:ro"]
