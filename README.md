@@ -212,9 +212,7 @@ sudo systemctl enable --now watchdog.timer
 
 **Hardware**: designed and budgeted for the DGX Spark (GB10, 128 GB unified
 memory, `sm_121`). Chat at NVIDIA's native 2-bit (24 GB build), everything else
-Q8_0 → ~60 GiB resident, ~55 GiB headroom. A full-precision Q8_0 chat fallback
-lives in `models/nemotron/Q8_0/` — swap the `-m` path in `docker-compose.yaml`
-to use it (needs the vision profile stopped).
+Q8_0 → ~60 GiB resident, ~55 GiB headroom.
 
 **Layout**: `models/` (weights, ~96 GB, git-ignored — includes `flux3/loras/`
 and `flux3/upscalers/` add-on dirs, scanned live) · `data/` (whisper cache +
