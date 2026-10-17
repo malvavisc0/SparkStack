@@ -10,7 +10,7 @@ render takes about 36 s.
 ## Quick start
 
 `scripts/flux_client.py` is a command line client built on the Python standard
-library. It needs Python 3.8 or newer and no packages.
+library. It needs Python 3.10 or newer and no packages.
 
 ```bash
 ./scripts/flux_client.py generate "a red fox in a snowy forest, evening light" --out fox.png

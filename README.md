@@ -32,7 +32,7 @@ Nemotron-3.5-Bolt-74B — a compressed-and-retrained (quantization-aware
 distillation) version of the 74B model, designed by NVIDIA to run alongside other
 applications. It beats full-precision models of similar size on agentic benchmarks
 (Terminal-Bench 51 vs Qwen3.6-35B's 44, GPQA 86 vs 83, BrowseComp 67 vs 49), served
-by **vLLM** with b12x tensor-core kernels, 262K context and DFlash speculative
+by **vLLM** with b12x tensor-core kernels, 256K context and DFlash speculative
 decoding (7 draft tokens). Everything else — decisions, embeddings — runs on
 llama.cpp; images on stable-diffusion.cpp. The whole stack fits in the Spark's
 128 GB unified memory with ~35 GB to spare at idle.
@@ -90,6 +90,9 @@ route; decisions uses `/v1/systemone`).
 
 ### Chat (vision + text) — `:9193`
 
+Full guide: [docs/chat-api.md](docs/chat-api.md). The Python client is
+[scripts/chat_client.py](scripts/chat_client.py).
+
 ```bash
 curl http://192.168.1.10:9193/v1/chat/completions \
   -H 'Content-Type: application/json' \
@@ -99,19 +102,25 @@ curl http://192.168.1.10:9193/v1/chat/completions \
   }'
 ```
 
-Send images by adding an `image_url` content part. 262K context, tool calling
+Send images by adding an `image_url` content part. 256K context, tool calling
 and reasoning follow the model's chat template. With the OpenAI SDK, set
 `base_url="http://<spark>:9193/v1"`; the API key is ignored.
 
 ### Speech-to-text — `:9191`
 
+Full guide: [docs/speech-to-text-api.md](docs/speech-to-text-api.md). The Python
+client is [scripts/transcribe_client.py](scripts/transcribe_client.py).
+
 ```bash
-curl http://192.168.1.10:9191/transcribe -F audio_file=@sample.wav
+curl http://192.168.1.10:9191/transcribe -F file=@sample.wav -F language=en
 ```
 
-WhisperX `large-v3-turbo`, batched on GPU, with diarization.
+WhisperX `large-v3-turbo`, batched on GPU, with diarization and word timings.
 
 ### Text-to-speech — `:9192`
+
+Full guide: [docs/text-to-speech-api.md](docs/text-to-speech-api.md). The Python
+client is [scripts/tts_client.py](scripts/tts_client.py).
 
 ```bash
 curl http://192.168.1.10:9192/v1/audio/speech \
@@ -126,6 +135,9 @@ Formats: `wav`, `pcm`, `mp3`, or `zip` (audio + word timings).
 
 ### Embeddings — `:9195`
 
+Full guide: [docs/embeddings-api.md](docs/embeddings-api.md). The Python client is
+[scripts/embed_client.py](scripts/embed_client.py).
+
 ```bash
 curl http://192.168.1.10:9195/v1/embeddings \
   -H 'Content-Type: application/json' \
@@ -137,10 +149,13 @@ search for it with a text query.
 
 ### Decisions — `:9194`
 
+Full guide: [docs/decisions-api.md](docs/decisions-api.md). The Python client is
+[scripts/decide_client.py](scripts/decide_client.py).
+
 ```bash
 curl http://192.168.1.10:9194/v1/systemone \
   -H 'Content-Type: application/json' \
-  -d '{"question": "Is the user asking about the weather?", "choices": ["yes", "no"]}'
+  -d '{"state": "I was charged twice and want a refund.", "questions": {"refund": {"type": "noul", "instructions": "Is a refund requested?"}}}'
 ```
 
 One forward pass, zero output tokens: yes/no, best-of-N choices, or a score.

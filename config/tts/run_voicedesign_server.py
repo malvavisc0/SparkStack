@@ -1,6 +1,7 @@
 """OpenAI-compatible TTS server for Qwen3-TTS-12Hz-1.7B-VoiceDesign.
 
-Voices are described in a JSON registry: {"voice_id": {"instruct": "...", "language": "..."}}.
+Voices are described in a JSON registry with `instruct` and `language`
+fields for each voice id.
 The instruct text fully describes the voice; no reference audio is needed.
 """
 
@@ -69,7 +70,9 @@ class VoiceRegistry:
         if not source.exists():
             presets = source.with_name("voicedesign_voices.presets.json")
             if not presets.exists():
-                raise FileNotFoundError(f"no registry at {source} and no presets at {presets}")
+                raise FileNotFoundError(
+                    f"no registry at {source} and no presets at {presets}"
+                )
             logger.warning("%s missing, using presets %s", source, presets)
             source = presets
         with source.open(encoding="utf-8") as fh:
@@ -92,8 +95,10 @@ class VoiceRegistry:
             return {}
         raise HTTPException(
             status_code=404,
-            detail=f"Voice {name!r} is not registered and the request carried no 'instruct'."
-            f" Known voices: {sorted(self.current())}",
+            detail=(
+                f"Voice {name!r} is not registered and the request carried no "
+                f"'instruct'. Known voices: {sorted(self.current())}"
+            ),
         )
 
 
@@ -149,15 +154,26 @@ def pcm16(audio: np.ndarray) -> bytes:
 def wav_header(sample_rate: int) -> bytes:
     return struct.pack(
         "<4sI4s4sIHHIIHH4sI",
-        b"RIFF", 0xFFFFFFFF, b"WAVE",
-        b"fmt ", 16, 1, 1,
-        sample_rate, sample_rate * 2, 2, 16,
-        b"data", 0xFFFFFFFF,
+        b"RIFF",
+        0xFFFFFFFF,
+        b"WAVE",
+        b"fmt ",
+        16,
+        1,
+        1,
+        sample_rate,
+        sample_rate * 2,
+        2,
+        16,
+        b"data",
+        0xFFFFFFFF,
     )
 
 
 def mp3_bytes(audio: np.ndarray, sample_rate: int) -> bytes:
-    segment = AudioSegment(pcm16(audio), frame_rate=sample_rate, sample_width=2, channels=1)
+    segment = AudioSegment(
+        pcm16(audio), frame_rate=sample_rate, sample_width=2, channels=1
+    )
     buffer = io.BytesIO()
     segment.export(buffer, format="mp3")
     return buffer.getvalue()
@@ -168,10 +184,27 @@ def apply_tempo(audio: np.ndarray, speed: float, sample_rate: int) -> np.ndarray
         return audio
     result = subprocess.run(
         [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
-            "-filter:a", f"atempo={speed}",
-            "-f", "f32le", "-ar", str(sample_rate), "-ac", "1", "pipe:1",
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "f32le",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",
+            "-i",
+            "pipe:0",
+            "-filter:a",
+            f"atempo={speed}",
+            "-f",
+            "f32le",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",
+            "pipe:1",
         ],
         input=audio.tobytes(),
         capture_output=True,
@@ -180,14 +213,33 @@ def apply_tempo(audio: np.ndarray, speed: float, sample_rate: int) -> np.ndarray
     return np.frombuffer(result.stdout, dtype=np.float32)
 
 
-def spawn_tempo_stream(sample_rate: int, speed: float) -> tuple[subprocess.Popen, Any, Any]:
+def spawn_tempo_stream(
+    sample_rate: int, speed: float
+) -> tuple[subprocess.Popen, Any, Any]:
     """Spawn ffmpeg for tempo adjustment during streaming; caller owns the process."""
     ffmpeg = subprocess.Popen(
         [
-            "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "s16le", "-ar", str(sample_rate), "-ac", "1", "-i", "pipe:0",
-            "-filter:a", f"atempo={speed}",
-            "-f", "s16le", "-ar", str(sample_rate), "-ac", "1", "pipe:1",
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "s16le",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",
+            "-i",
+            "pipe:0",
+            "-filter:a",
+            f"atempo={speed}",
+            "-f",
+            "s16le",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",
+            "pipe:1",
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
@@ -218,7 +270,9 @@ async def pcm_stream(
     def produce() -> None:
         try:
             with MODEL_LOCK:
-                for chunk, _sr, _timing in model.generate_voice_design_streaming(**params):
+                for chunk, _sr, _timing in model.generate_voice_design_streaming(
+                    **params
+                ):
                     raw = pcm16(chunk)
                     if ffmpeg_stdin is not None:
                         ffmpeg_stdin.write(raw)
@@ -260,7 +314,9 @@ def create_app(
         try:
             from qwen_asr import Qwen3ForcedAligner
         except ImportError as exc:
-            raise HTTPException(status_code=500, detail="qwen-asr is not installed") from exc
+            raise HTTPException(
+                status_code=500, detail="qwen-asr is not installed"
+            ) from exc
         logger.info("Loading Qwen3-ForcedAligner-0.6B...")
         loaded = Qwen3ForcedAligner.from_pretrained(
             "Qwen/Qwen3-ForcedAligner-0.6B", dtype=torch.bfloat16, device_map="cuda"
@@ -282,7 +338,9 @@ def create_app(
         audio = apply_tempo(audio, req.speed, sr)
         if req.response_format == "zip":
             entries = aligner().align(
-                audio=(audio, sr), text=req.input, language=voice_cfg.get("language", "Auto")
+                audio=(audio, sr),
+                text=req.input,
+                language=voice_cfg.get("language", "Auto"),
             )
             buffer = io.BytesIO()
             with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -309,7 +367,9 @@ def create_app(
 
         if fmt in ("mp3", "zip"):
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(None, lambda: render_buffered(req, params, voice_cfg))
+            return await loop.run_in_executor(
+                None, lambda: render_buffered(req, params, voice_cfg)
+            )
 
         async def audio_stream() -> AsyncIterator[bytes]:
             if fmt == "wav":
