@@ -5,18 +5,19 @@
 A complete private AI server for the **NVIDIA DGX Spark**. The Spark is the server;
 everything else on your LAN — agents, apps, other machines — are its clients:
 
-```
-your agent ──POST http://<spark>:9193/v1/chat/completions──►  74B chat + vision
-your agent ──POST http://<spark>:9195/v1/embeddings────────►  text/image/video/audio embeddings
-your app  ───POST http://<spark>:9196/v1/images/generations►  FLUX.3 image generation + editing
-your agent ──POST http://<spark>:9191/transcribe───────────►  speech-to-text
-your agent ──POST http://<spark>:9192/v1/audio/speech──────►  text-to-speech, 10 voices
-your agent ──POST http://<spark>:9194/v1/systemone─────────►  one-shot decisions (yes/no/score)
-browsers ────GET  http://<spark>:9190  ·  :9197───────────►  status page · logs
-```
+| Port | Endpoint | Serves |
+|---|---|---|
+| `:9193` | `POST /v1/chat/completions` | 74B chat + vision |
+| `:9194` | `POST /v1/systemone` | one-shot decisions (yes/no/score) |
+| `:9195` | `POST /v1/embeddings` | text/image/video/audio embeddings |
+| `:9196` | `POST /v1/images/generations` | FLUX.3 image generation + editing |
+| `:9191` | `POST /transcribe` | speech-to-text |
+| `:9192` | `POST /v1/audio/speech` | text-to-speech, 10 voices |
+| `:9190` | browser | status dashboard |
+| `:9197` | browser | container logs |
 
-`<spark>` is your Spark's LAN address — the installer prints it, and
-`./sparkstack.sh server` prints the full endpoint map anytime. On this network that
+Prefix any endpoint with your Spark's LAN address — the installer prints it, and
+`./sparkstack.sh server` prints the full endpoint map anytime. On this network the
 address stays fixed (set a static DHCP lease so it never surprises you).
 
 What you get: **chat with vision, a decision model, multimodal embeddings, image
