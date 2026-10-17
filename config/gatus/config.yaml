@@ -27,6 +27,13 @@ endpoints:
     client: { timeout: 10s }
     conditions: ["[STATUS] == 200"]
 
+  - name: reranker
+    group: apis
+    url: "http://reranker:8080/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
   - name: FLUX.3 image
     group: apis
     # sd-server has no /health; its embedded web UI at "/" is the only guaranteed-200 route
@@ -45,6 +52,20 @@ endpoints:
   - name: Qwen3-TTS
     group: apis
     url: "http://tts-voicedesign:8000/health"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: Prometheus
+    group: status
+    url: "http://prometheus:9090/-/healthy"
+    interval: 30s
+    client: { timeout: 10s }
+    conditions: ["[STATUS] == 200"]
+
+  - name: Grafana
+    group: status
+    url: "http://grafana:3000/api/health"
     interval: 30s
     client: { timeout: 10s }
     conditions: ["[STATUS] == 200"]

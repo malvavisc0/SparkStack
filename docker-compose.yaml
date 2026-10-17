@@ -5,6 +5,8 @@ networks:
 
 volumes:
   dozzle_data: {}
+  prometheus_data: {}
+  grafana_data: {}
 
 x-gpu: &gpu
   # Every GPU service merges this anchor; dozzle does not. The label feeds
@@ -96,9 +98,19 @@ services:
       llama-server
       -m /models/embeddinggemma-2/embeddinggemma-2-Q8_0.gguf
       --mmproj /models/embeddinggemma-2/mmproj-Q8_0.gguf
-      --embedding --pooling mean
+      --embedding --pooling mean --metrics
       --host 0.0.0.0 --port 8080 -ngl 999 -c 8192 --alias embeddinggemma-2
     ports: ["9195:8080"]
+
+  reranker:
+    profiles: ["utility"]
+    <<: *llama-service
+    command: >
+      llama-server
+      -m /models/reranker/Qwen3-Reranker-0.6B.Q8_0.gguf
+      --reranking --pooling rank --embedding --metrics
+      --host 0.0.0.0 --port 8080 -ngl 999 -c 8192 --alias qwen3-reranker
+    ports: ["9198:8080"]
 
   image-flux3:
     profiles: ["vision"]
@@ -216,6 +228,79 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  prometheus:
+    profiles: ["status"]
+    labels: ["sparkstack=true"]
+    image: prom/prometheus:v3.5.0
+    networks: [sparkstack]
+    ports: ["9199:9090"]
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+    restart: unless-stopped
+
+  grafana:
+    profiles: ["status"]
+    labels: ["sparkstack=true"]
+    image: grafana/grafana:12.1.0
+    networks: [sparkstack]
+    ports: ["9200:3000"]
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-sparkstack}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+
+  node-exporter:
+    profiles: ["status"]
+    labels: ["sparkstack=true"]
+    image: prom/node-exporter:v1.9.1
+    networks: [sparkstack]
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - ./data/node-exporter/textfile:/var/lib/node-exporter/textfile:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      - --collector.textfile.directory=/var/lib/node-exporter/textfile
+    restart: unless-stopped
+
+  gpu-exporter:
+    profiles: ["status"]
+    image: nvcr.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04
+    networks: [sparkstack]
+    volumes:
+      - ./scripts/gpu-metrics.sh:/opt/sparkstack/gpu-metrics.sh:ro
+      - ./data/node-exporter/textfile:/metrics
+    command:
+      - /bin/bash
+      - -c
+      - while true; do /opt/sparkstack/gpu-metrics.sh /metrics/gpu.prom; sleep 15; done
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - test $$(( $$(date +%s) - $$(stat -c %Y /metrics/gpu.prom) )) -lt 60
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    <<: *gpu
 
   tools:
     profiles: ["tools"]

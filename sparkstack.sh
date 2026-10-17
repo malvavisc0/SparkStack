@@ -114,8 +114,9 @@ prepare_layout() {
   mkdir -p "$ROOT/models/nemotron" "$ROOT/models/d1-3B" \
             "$ROOT/models/embeddinggemma-2" "$ROOT/models/flux3" \
             "$ROOT/models/flux3/loras" "$ROOT/models/flux3/upscalers" \
-            "$ROOT/models/tts" \
-            "$ROOT/data" "$ROOT/config/tts" "$ROOT/config/sd"
+            "$ROOT/models/reranker" "$ROOT/models/tts" \
+            "$ROOT/data" "$ROOT/data/node-exporter/textfile" \
+            "$ROOT/config/tts" "$ROOT/config/sd"
   log "layout ready — models/ data/ are git-ignored"
 }
 
@@ -142,7 +143,9 @@ download_models() { # group: all|llm|image|utility|audio
   case "$group" in
     all|utility)
       dl LiquidAI/d1-3B-GGUF           "$MODELS_DIR/d1-3B"          --include '*Q8_0*'
-      dl unsloth/embeddinggemma-2-GGUF "$MODELS_DIR/embeddinggemma-2" --include '*Q8_0*' ;;
+      dl unsloth/embeddinggemma-2-GGUF "$MODELS_DIR/embeddinggemma-2" --include '*Q8_0*'
+      dl Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp \
+         "$MODELS_DIR/reranker" --include 'Qwen3-Reranker-0.6B.Q8_0.gguf' ;;
   esac
   case "$group" in
     all|image)
@@ -179,6 +182,7 @@ verify_models() { # group
         d1-3B/mmproj-d1-3B-Q8_0.gguf
         embeddinggemma-2/embeddinggemma-2-Q8_0.gguf
         embeddinggemma-2/mmproj-Q8_0.gguf
+        reranker/Qwen3-Reranker-0.6B.Q8_0.gguf
       ) ;;
   esac
   case "$group" in
@@ -223,9 +227,12 @@ Point your services and agents at these endpoints:
   decisions ........ http://$ip:9194/v1/systemone
   embeddings ....... http://$ip:9195/v1/embeddings
   images ............ http://$ip:9196/v1/images/generations
+  reranking ......... http://$ip:9198/v1/rerank
   speech-to-text ... http://$ip:9191/transcribe
   text-to-speech ... http://$ip:9192/v1/audio/speech
   status page ...... http://$ip:9190
+  metrics .......... http://$ip:9199
+  dashboards ....... http://$ip:9200
   container logs ... http://$ip:9197
 EOF
 }
@@ -278,8 +285,8 @@ post_json() { # port path json -> prints response body
 test_service() { # name  — runs one check; records failure
   local name="$1"
   case "$name" in
-    d1-decide|embeddings|llm-nemotron|image-flux3|whisper-x|tts-voicedesign|status) ;;
-    *) die "unknown service '$name' (d1-decide|embeddings|llm-nemotron|image-flux3|whisper-x|tts-voicedesign|status)" ;;
+    d1-decide|embeddings|reranker|llm-nemotron|image-flux3|whisper-x|tts-voicedesign|status|prometheus|grafana|gpu-exporter) ;;
+    *) die "unknown service '$name' (d1-decide|embeddings|reranker|llm-nemotron|image-flux3|whisper-x|tts-voicedesign|status|prometheus|grafana|gpu-exporter)" ;;
   esac
   if [ "$(compose_ps_status "$name")" != "running" ]; then
     warn "$name: not running — skipping (start it with: ./sparkstack.sh up)"
@@ -326,6 +333,37 @@ check_embeddings() {
   port="$(svc_port embeddings)" && curl -fsS -m 10 "http://localhost:$port/health" >/dev/null \
  && reply="$(post_json "$port" /v1/embeddings '{"input":"warmup","model":"embeddinggemma-2"}')" \
  && echo "    embeddings: /health ok, vector dim $(echo "$reply" | python3 -c 'import json,sys; print(len(json.load(sys.stdin)["data"][0]["embedding"]))')"
+}
+
+# reranker: health + a real rerank request (warms the rank head)
+check_reranker() {
+  local port reply
+  port="$(svc_port reranker)" && curl -fsS -m 10 "http://localhost:$port/health" >/dev/null \
+ && reply="$(post_json "$port" /v1/rerank '{"query":"termination notice","documents":["The Labour Code requires 30 days written notice.","Corporate tax rates for small enterprises."]}')" \
+ && echo "    reranker: /health ok, top score $(echo "$reply" | python3 -c 'import json,sys; print("{:.3f}".format(json.load(sys.stdin)["results"][0]["relevance_score"]))')"
+}
+
+# prometheus: its own health route
+check_prometheus() {
+  local port
+  port="$(svc_port prometheus 9090)" && curl -fsS -m 10 "http://localhost:$port/-/healthy" >/dev/null \
+ && echo "    prometheus: /-/healthy ok"
+}
+
+# grafana: its own health route
+check_grafana() {
+  local port
+  port="$(svc_port grafana 3000)" && curl -fsS -m 10 "http://localhost:$port/api/health" >/dev/null \
+ && echo "    grafana: /api/health ok"
+}
+
+# gpu-exporter: a fresh textfile sample
+check_gpu-exporter() {
+  local age
+  [ -f data/node-exporter/textfile/gpu.prom ] || return 1
+  age=$(( $(date +%s) - $(stat -c %Y data/node-exporter/textfile/gpu.prom) ))
+  [ "$age" -lt 60 ] || return 1
+  echo "    gpu-exporter: sample ${age}s old"
 }
 
 # llm-nemotron: health (vLLM cold load takes minutes) + a real chat completion
@@ -375,7 +413,7 @@ cmd_test() {
   ensure_docker
   TEST_SKIPPED=0
   local svc
-  for svc in d1-decide embeddings llm-nemotron image-flux3 whisper-x tts-voicedesign status; do
+  for svc in d1-decide embeddings reranker llm-nemotron image-flux3 whisper-x tts-voicedesign status prometheus grafana gpu-exporter; do
     test_service "$svc" || true
   done
   if [ "$TEST_FAILURES" -gt 0 ]; then

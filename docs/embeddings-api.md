@@ -91,6 +91,9 @@ photo and its text description scored 0.71, while two unrelated sentences scored
 about 0.5. Calibrate a threshold on your own data instead of assuming a fixed
 cutoff.
 
+Pair retrieval with the [reranker](reranking-api.md) to put the best passages
+first.
+
 ## Context and chunking
 
 The model has an 8,192 token context. Long documents must be split before

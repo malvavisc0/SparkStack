@@ -11,11 +11,14 @@ everything else on your LAN — agents, apps, other machines — are its clients
 | `:9193` | `POST /v1/chat/completions` | 74B chat + vision |
 | `:9194` | `POST /v1/systemone` | one-shot decisions (yes/no/score) |
 | `:9195` | `POST /v1/embeddings` | text/image/video/audio embeddings |
+| `:9198` | `POST /v1/rerank` | cross-encoder reranking |
 | `:9196` | `POST /v1/images/generations` | FLUX.3 image generation + editing |
 | `:9191` | `POST /transcribe` | speech-to-text |
 | `:9192` | `POST /v1/audio/speech` | text-to-speech, 10 voices |
 | `:9190` | browser | status dashboard |
 | `:9197` | browser | container logs |
+| `:9199` | browser | Prometheus metrics |
+| `:9200` | browser | Grafana dashboards |
 
 Prefix any endpoint with your Spark's LAN address — the installer prints it, and
 `./sparkstack.sh server` prints the full endpoint map anytime. On this network the
@@ -23,8 +26,9 @@ address stays fixed (set a static DHCP lease so it never surprises you).
 
 Service guides and Python clients are indexed in [docs/README.md](docs/README.md).
 
-What you get: **chat with vision, a decision model, multimodal embeddings, image
-generation, speech-to-text and text-to-speech** behind one LAN address. Your own
+What you get: **chat with vision, a decision model, a reranker, multimodal
+embeddings, image generation, speech-to-text and text-to-speech** behind one LAN
+address, with Prometheus metrics and Grafana dashboards. Your own
 AI backend with no API bills, no rate limits, no data leaving your LAN.
 Good for private coding agents, RAG over your own documents and media, local voice
 assistants, batch image generation, and routing/triage inside agent loops.
@@ -41,7 +45,7 @@ llama.cpp; images on stable-diffusion.cpp. The whole stack fits in the Spark's
 
 ## Install (on the Spark)
 
-Needs Docker + Compose v2, git and curl, plus ~110 GB free disk (42 GB of models,
+Needs Docker + Compose v2, git and curl, plus ~110 GB free disk (43 GB of models,
 the rest Docker images). `install` checks the tooling and installs `uv` if needed.
 
 1. Clone and configure:
@@ -64,7 +68,7 @@ the rest Docker images). `install` checks the tooling and installs `uv` if neede
    ./sparkstack.sh install
    ```
 
-`install` downloads the models (~42 GB), builds the images (llama.cpp,
+`install` downloads the models (~43 GB), builds the images (llama.cpp,
 stable-diffusion.cpp, and NVIDIA's recipe-pinned vLLM image with b12x kernels)
 for the GB10 GPU, starts everything, and prints the endpoint map — everything
 your clients need. On this box it's `192.168.1.10`; check
@@ -149,6 +153,20 @@ curl http://192.168.1.10:9195/v1/embeddings \
 One 768-dim space shared by **text, images, video and audio** — embed a photo and
 search for it with a text query.
 
+### Reranking — `:9198`
+
+Full guide: [docs/reranking-api.md](docs/reranking-api.md). The Python client is
+[scripts/rerank_client.py](scripts/rerank_client.py).
+
+```bash
+curl http://192.168.1.10:9198/v1/rerank \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "termination notice", "documents": ["The Labour Code requires 30 days written notice.", "Corporate tax rates for small enterprises."]}'
+```
+
+Qwen3-Reranker-0.6B scores the query and each document together. Use it after
+vector search to put the best passages first. Three documents take about 30 ms.
+
 ### Decisions — `:9194`
 
 Full guide: [docs/decisions-api.md](docs/decisions-api.md). The Python client is
@@ -215,7 +233,7 @@ poll `/sdcpp/v1/jobs/{id}`) unlocks everything the OpenAI route doesn't:
 # (~36 s total for a 1536² image; direct 2048 is ~52 s and softer)
 curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
   -H 'Content-Type: application/json' \
-  -d '{"prompt": "a red fox in a snowy forest, evening light",
+  -d '{"prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, orange fur catching the last light, dark evergreens behind it.",
        "width": 1024, "height": 1024,
        "hires": {"enabled": true, "upscaler": "Latent (nearest-exact)",
                   "scale": 1.5, "denoising_strength": 0.45, "steps": 8}}'
@@ -235,6 +253,10 @@ curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
 - **<http://192.168.1.10:9197>** — Dozzle: live logs of every container, searchable.
   It also exposes an MCP endpoint at `/api/mcp` so agents can query the logs
   directly (requires the MCP initialize handshake).
+- **<http://192.168.1.10:9199>** — Prometheus: vLLM and llama.cpp metrics, 30 day retention.
+- **<http://192.168.1.10:9200>** — Grafana: the SparkStack dashboard. Anonymous
+  viewers can read; the admin password comes from `GRAFANA_ADMIN_PASSWORD`.
+  The GPU collector runs in the status profile. See [docs/metrics.md](docs/metrics.md).
 
 ## Operate it
 
@@ -274,18 +296,19 @@ sudo systemctl enable --now watchdog.timer
 memory, `sm_121`). Chat at NVIDIA's native 2-bit (24 GB build), the rest
 quantized or FP16 → ~85 GiB resident at idle, ~35 GiB available.
 
-**Layout**: `models/` (weights, ~42 GB, git-ignored — includes `flux3/loras/`
-and `flux3/upscalers/` add-on dirs, scanned live) · `data/` (whisper cache +
-watchdog log, git-ignored) · `config/` (dashboards, TTS server + voices,
-diffusion presets, prompt templates, committed) · `.env` (your token,
-git-ignored).
+**Layout**: `models/` (weights, ~43 GB, git-ignored — includes `flux3/loras/`
+and `flux3/upscalers/` add-on dirs, scanned live) · `data/` (whisper cache,
+watchdog log, GPU textfile, git-ignored) · `config/` (dashboards, TTS server +
+voices, diffusion presets, prompt templates, Prometheus, Grafana, committed) ·
+`.env` (your token, git-ignored).
 
 **Security**: no auth anywhere — it's for a trusted LAN. Anyone who can reach the
 host can call every model; Dozzle mounts `docker.sock` and runs with
 `DOZZLE_ENABLE_ACTIONS` + `DOZZLE_ENABLE_SHELL`, so it can start/stop containers
 and `exec` a shell into them from the UI (the `:ro` on the socket mount is
 cosmetic — it does not block API writes). Anyone who can reach Dozzle has the
-same power as root on this host. Keep the box private or behind a VPN. Don't
+same power as root on this host. Prometheus has no authentication and Grafana
+allows anonymous viewing. Keep the box private or behind a VPN. Don't
 port-forward the 919x block.
 
 **Troubleshooting**
