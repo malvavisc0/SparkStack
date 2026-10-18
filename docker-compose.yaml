@@ -88,7 +88,7 @@ services:
       llama-server
       -m /models/d1-3B/d1-3B-Q8_0.gguf
       --mmproj /models/d1-3B/mmproj-d1-3B-Q8_0.gguf
-      --host 0.0.0.0 --port 8080 -ngl 999 -c 32768
+      --host 0.0.0.0 --port 8080 -ngl 999 -c 32768 -b 2048 -ub 2048
     ports: ["9194:8080"]
 
   embeddings:
@@ -99,7 +99,7 @@ services:
       -m /models/embeddinggemma-2/embeddinggemma-2-Q8_0.gguf
       --mmproj /models/embeddinggemma-2/mmproj-Q8_0.gguf
       --embedding --pooling mean --metrics
-      --host 0.0.0.0 --port 8080 -ngl 999 -c 8192 --alias embeddinggemma-2
+      --host 0.0.0.0 --port 8080 -ngl 999 -c 8192 -b 2048 -ub 2048 --alias embeddinggemma-2
     ports: ["9195:8080"]
 
   reranker:
