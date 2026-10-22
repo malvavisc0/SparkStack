@@ -197,11 +197,11 @@ curl -s http://192.168.1.10:9196/v1/images/generations \
   | python3 -c 'import json,sys,base64; open("fox.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
 ```
 
-The service defaults are tuned for the distilled model: 8 steps with
-`dpm++2m` + `karras`, about 11 s per 1024² image. More steps only smooth the
-result here. Override per request with
-`<sd_cpp_extra_args>{"sample_params":{"sample_steps":16}}</sd_cpp_extra_args>`
-(or `sample_params` on the native API).
+The service defaults are 24 steps with `dpm++2m` + `karras`, about 27 s per
+1024² image. At 8 steps this build regularly mangled faces and hands; 24 is the
+lowest step count that stayed clean in testing. Override per request with
+`<sd_cpp_extra_args>{"sample_steps":16}</sd_cpp_extra_args>` (or `sample_params`
+on the native API). `seed` is a top-level field, not part of `sample_params`.
 
 **Editing** — `POST /v1/images/edits` (multipart) takes one or more `image`
 fields. The first becomes the img2img init image (EDIT mode); all of them are
@@ -220,8 +220,11 @@ curl -s http://192.168.1.10:9196/v1/images/edits \
 
 The native async API also takes `strength` directly, per request. Caveat:
 FLUX.3 Klein is img2img + multi-reference conditioning. `ref_images` alone
-reproduces the reference rather than editing it, and masked inpaint is
-unreliable — prompt-driven img2img is the working edit path.
+reproduces the reference rather than editing it, masked inpaint is unreliable,
+and even at strength 0.9 the model may return the same subject in a new render
+instead of following the caption. Use it for style and incidental variation,
+not for replacing an object or changing identity. The Python client sends only
+the extra images as references, never the init image twice.
 
 sd-server also serves a web UI at `:9196` for interactive use.
 
@@ -229,21 +232,24 @@ sd-server also serves a web UI at `:9196` for interactive use.
 poll `/sdcpp/v1/jobs/{id}`) unlocks everything the OpenAI route doesn't:
 
 ```bash
-# two-pass generation: 1024 base → 1.5x latent upscale → 8-step refine
-# (~36 s total for a 1536² image; direct 2048 is ~52 s and softer)
+# two-pass generation: 1024 base → 1.5x RealESRGAN upscale → refine at base steps
+# (~128 s for 1248x1824 from an 832x1216 base; latent upscalers smear faces)
 curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, orange fur catching the last light, dark evergreens behind it.",
        "width": 1024, "height": 1024,
-       "hires": {"enabled": true, "upscaler": "Latent (nearest-exact)",
-                  "scale": 1.5, "denoising_strength": 0.45, "steps": 8}}'
+       "hires": {"enabled": true, "upscaler": "RealESRGAN_x4",
+                  "scale": 1.5, "denoising_strength": 0.3, "steps": 0}}'
 ```
 
 - **LoRA**: drop FLUX-compatible LoRA files in `models/flux3/loras/` — they
   appear in `GET /sdapi/v1/loras` and attach per-request via the structured
   `lora` field (prompt-embedded `<lora:...>` tags are intentionally ignored).
-- **Upscalers**: drop ESRGAN-family models in `models/flux3/upscalers/` to use
-  them by name as `hires.upscaler` instead of the built-in latent modes.
+- **Upscalers**: `RealESRGAN_x4` is installed in `models/flux3/upscalers/` and
+  is the default for hires. If that file is missing, download
+  `RealESRGAN_x4.pth` from `ai-forever/Real-ESRGAN` on Hugging Face into that
+  directory. Drop other ESRGAN-family models there to use them by name instead
+  of the built-in latent modes.
 
 ### Monitoring
 

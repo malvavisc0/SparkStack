@@ -120,8 +120,17 @@ services:
       args: { CUDA_ARCH: 121a-real, SD_REF: "${SD_REF:-master}" }
     # --strength 0.9: the 0.75 default under-edits when an init image is present.
     # Only used for edits/img2img; text-to-image ignores it.
-    # 8 steps: this distilled model gains texture up to ~8 steps; 16+ only smooths it.
-    # dpm++2m + karras: measurably more glaze/edge detail than euler (same runtime).
+    # 24 steps: this build's faces and hands are clean at 24; at 8 they are often
+    # mangled and the extra texture is grain, not detail (measured at 832x1216).
+    # --cfg-scale 1.0: Klein is distilled for guidance 3.5, so CFG is off and
+    # negative prompts do not apply. Do not raise this expecting negatives to work.
+    # --hires-steps 0: reuse --steps for the hires pass instead of 8.
+    # --hires-upscaler RealESRGAN_x4: Real-ESRGAN is installed in
+    # models/flux3/upscalers. The built-in latent upscalers repaint and smear faces
+    # even at low denoise, so keep a model-backed upscaler as the default.
+    # --hires-denoising-strength 0.3: enough to blend the upscale without smearing.
+    # --rng/--sampler-rng std_default: pin the sampler RNG explicitly. Pixel-level
+    # variation remains because the GPU kernels are not bit-exact.
     command: >
       sd-server
       --listen-ip 0.0.0.0 --listen-port 8080
@@ -130,9 +139,11 @@ services:
       --vae /models/flux3/ae.safetensors
       --lora-model-dir /models/flux3/loras
       --hires-upscalers-dir /models/flux3/upscalers
-      --steps 8 --cfg-scale 1.0 --strength 0.9
+      --steps 24 --cfg-scale 1.0 --strength 0.9
+      --hires-steps 0 --hires-upscaler RealESRGAN_x4 --hires-denoising-strength 0.3
       --sampling-method dpm++2m --scheduler karras
-      --diffusion-fa --flash-attn on --sage-attn --cache-mode easycache
+      --rng std_default --sampler-rng std_default
+      --diffusion-fa --flash-attn on --sage-attn
     ports: ["9196:8080"]
     volumes: ["./models:/models:ro"]
     networks: [sparkstack]

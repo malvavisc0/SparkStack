@@ -2,10 +2,11 @@
 
 The `image-flux3` service runs FLUX.3 Image Klein on port `:9196`. It serves the
 OpenAI image routes for normal work and a native async API for hires passes,
-exact seeds and sampler control. Both routes use the same model and the same
-defaults: 8 steps, `dpm++2m` with the `karras` scheduler, and strength 0.9 for
-edits. A 1024x1024 render takes about 11 s, plus about 1 s for prompt expansion;
-a 1536x1536 hires render takes about 36 s plus prompt expansion.
+fixed seeds and sampler control. Both routes use the same model and the same
+defaults: 24 steps, `dpm++2m` with the `karras` scheduler, strength 0.9 for
+edits, and `RealESRGAN_x4` for hires. A 1024x1024 render takes about 27 s, plus
+about 1 s for prompt expansion; a 1248x1824 hires render (1.5x from 832x1216)
+takes about 128 s plus prompt expansion.
 
 ## Quick start
 
@@ -13,8 +14,8 @@ a 1536x1536 hires render takes about 36 s plus prompt expansion.
 library. It needs Python 3.10 or newer and no packages.
 
 The client always expands the prompt through the local chat model before it
-renders. That step needs the `llm` profile, and there is no flag to skip it. Use
-`--show-prompt` to see the caption that was sent.
+renders. That step needs the `llm` profile. Pass `--no-expand` to send the prompt
+as-is, and `--show-prompt` to see the caption that was sent.
 
 ```bash
 ./scripts/flux_client.py generate "a red fox in a snowy forest, evening light" --out fox.png
@@ -34,13 +35,17 @@ service at `http://localhost:9193` by default. Point it at another host with
 ```
 
 It prints the output path, the image dimensions and the time the job took. Add
-`--seed` to make a result repeatable.
+`--seed` to reproduce a result. The seed is sent as a top-level field, which is
+the only place `sd-server` reads it. Individual pixels can still differ between
+runs because the GPU kernels are not bit-exact, so compare images visually.
 
 ## Prompt expansion
 
 The model expects a full scene caption. The client sends the request through the
 chat model with the templates in `config/image/`, adapted from BFL's FLUX.3
-prompt upsampler, then renders the returned caption. Edits use the first image
+prompt upsampler, then renders the returned caption. Expansion may reword or
+drop details, so pass `--no-expand` with a full caption when exact wording
+matters, for example character continuity across a series. Edits use the first image
 as context for the expansion. Multi-reference edits still send every reference
 to the image model, but the caption writer sees only the first one.
 
@@ -63,13 +68,13 @@ curl -s http://192.168.1.10:9196/v1/images/generations \
 
 The server generates at 1024x1024 when `size` is absent. That is the model's
 native size and the best detail per second. A direct 2048x2048 render works, but
-it is softer than a hires pass and takes about 52 s.
+it is softer than a hires pass and takes several times longer.
 
 The route accepts `<sd_cpp_extra_args>` in the prompt for per-request overrides.
-Sampler fields go under `sample_params`:
+Sampler fields go under `sample_params`, but `seed` is top-level:
 
 ```text
-a red fox in a snowy forest <sd_cpp_extra_args>{"sample_params":{"sample_steps":16,"seed":42}}</sd_cpp_extra_args>
+a red fox in a snowy forest <sd_cpp_extra_args>{"sample_steps":16,"seed":42}</sd_cpp_extra_args>
 ```
 
 The tag is removed before the prompt reaches the model. Both routes return PNG
@@ -96,12 +101,19 @@ curl -s http://192.168.1.10:9196/v1/images/edits \
 edit, pass a lower value in the prompt:
 
 ```text
-change the mug to bright blue <sd_cpp_extra_args>{"strength":0.6}</sd_cpp_extra_args>
+repaint the mug in a bright blue glaze <sd_cpp_extra_args>{"strength":0.6}</sd_cpp_extra_args>
 ```
+
+Do not expect an instruction editor. Klein follows the caption only weakly: at
+strength 0.9 it can return the same subject in a fresh render instead of changing
+its color, and text or object replacement is unreliable. Use it for styling,
+framing and incidental variation, and compose the change in post when identity
+must change.
 
 The native API takes `strength` as a normal JSON field. Send the source image as
 a base64 string in `init_image` and any extra references in `ref_images`; the
-Python client encodes both for you.
+Python client encodes both for you and does not send the init image again as a
+reference.
 
 FLUX.3 Klein is an img2img model with reference conditioning, not an
 instruction editor. A reference image on its own tends to reproduce the
@@ -119,7 +131,8 @@ curl -s http://192.168.1.10:9196/sdcpp/v1/img_gen \
     "prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, orange fur catching the last light, dark evergreens behind it.",
     "width": 1024,
     "height": 1024,
-    "sample_params": {"sample_steps": 8, "sample_method": "dpm++2m", "scheduler": "karras", "seed": 42}
+    "seed": 42,
+    "sample_params": {"sample_steps": 24, "sample_method": "dpm++2m", "scheduler": "karras"}
   }'
 ```
 
@@ -151,17 +164,20 @@ the base image; the second pass upscales it and repaints at the target scale.
   "height": 1024,
   "hires": {
     "enabled": true,
-    "upscaler": "Latent (nearest-exact)",
+    "upscaler": "RealESRGAN_x4",
     "scale": 1.5,
-    "denoising_strength": 0.45,
-    "steps": 8
+    "denoising_strength": 0.3,
+    "steps": 0
   }
 }
 ```
 
-A scale of 1.5 turns a 1024x1024 base into 1536x1536. Denoise 0.45 keeps the
-base composition; 0.55 repaints more if the upscale looks soft. Direct 2048x2048
-generation is an option, but the hires pass is sharper for the same output size.
+A scale of 1.5 turns a 1024x1024 base into 1536x1536. `"steps": 0` reuses the
+base render's step count. Denoise 0.3 blends the upscale without repainting it;
+higher values smear faces even with a model-backed upscaler. Direct 2048x2048
+generation is an option, but a RealESRGAN hires pass is sharper for the same
+output size. Without an upscaler model, the built-in latent modes repaint the
+image and are not a safe default.
 
 ## Timings
 
@@ -169,34 +185,35 @@ Measured on the Spark with the server defaults:
 
 | Output | Time |
 |---|---|
-| 512x512 generation | ~2.5 s |
-| 1024x1024 generation | ~11 s |
-| 1536x1536 hires from 1024 | ~36 s |
-| 2048x2048 direct | ~52 s |
-| 512x512 edit | ~5 s |
+| 512x512, 12 steps | ~4 s |
+| 1024x1024, 24 steps | ~27 s |
+| 832x1216, 24 steps | ~27 s |
+| 1248x1824 hires from 832x1216 | ~128 s |
+| 512x512 edit, 24 steps | ~11 s |
 
 These are render times. The client adds about 1 s for prompt expansion. Timings
 vary with prompt length, queue depth and the desktop's other work.
 
 ## Sampling settings
 
-This model is distilled, so more steps do not add detail. In a fixed-seed
-comparison, 8 and 16 steps looked similar while 24 and 32 steps produced smoother
-images at a higher cost. `dpm++2m` with `karras` produced more edge detail than
-`euler` at the same step count. EasyCache made no measurable difference here.
+The distilled model still needs enough steps for faces and hands. At 832x1216
+and 1024x1024, 8 steps regularly produced mangled hands, distorted eyes and waxy
+skin; 24 steps was clean, and the extra time is about 2.5x. `dpm++2m` with
+`karras` is the default. EasyCache is disabled because it adds run-to-run drift
+without a useful speedup at this size.
 
-Keep the default 8 steps for drafts and most final work. Raise the step count
-only when you want a smoother result.
+Keep the default 24 steps. Drop to 8-12 only for layout drafts you will discard,
+and prefer a RealESRGAN hires pass over raising steps past 24 for detail.
 
 | Field | What it does |
 |---|---|
 | `prompt` | The scene to draw. The client expands it into a caption first. |
-| `negative_prompt` | Things to avoid, such as `text, letters, words, logos`. |
+| `negative_prompt` | Accepted, but inert while the service runs `--cfg-scale 1.0` (distilled guidance). Negatives need CFG > 1. |
 | `width`, `height` | Output size. 1024x1024 is the native size. |
-| `sample_params.sample_steps` | Sampling steps. The service default is 8. |
+| `sample_params.sample_steps` | Sampling steps. The service default is 24. |
 | `sample_params.sample_method` | Sampler, for example `dpm++2m` or `euler`. |
 | `sample_params.scheduler` | Sigma schedule, for example `karras`. |
-| `sample_params.seed` | Fix this value to reproduce a result. |
+| `seed` | Top-level integer. Reproduces the composition; pixels can still vary. |
 | `init_image` | Base64 source image for img2img. |
 | `strength` | How much of the init image is repainted. |
 | `ref_images` | Base64 reference images for conditioning, up to 10. |
@@ -222,8 +239,8 @@ Put ESRGAN-family models in `models/flux3/upscalers` and name one in
   id and check `./sparkstack.sh logs image-flux3`.
 - An edit that returns an unrecognizable subject usually had too much strength.
   Try 0.6 and name the subject in the prompt.
-- Text in images is unreliable. Keep lettering out of the prompt or add
-  `text, letters, words` to `--negative`.
+- Text in images is unreliable. Keep lettering out of the prompt; negative
+  prompts do not take effect at `--cfg-scale 1.0`.
 
 ## Python client
 
@@ -233,12 +250,12 @@ the full flag list.
 | Command | Use |
 |---|---|
 | `generate` | Text to image. Accepts `--width`, `--height`, `--steps`, `--sampler`, `--scheduler`, `--seed`, `--negative` and `--out`. |
-| `edit` | Image to image. Pass the init image first, then any references. Accepts `--strength`, `--width` and `--height`. |
+| `edit` | Image to image. Pass the init image first, then any references (references are sent as `ref_images`, the init is not duplicated). Accepts `--strength`, `--width` and `--height`. |
 | `hires` | Two-pass render. Accepts `--scale`, `--denoise`, `--hires-steps`, `--upscaler`, `--width` and `--height`. |
 
-All three accept `--api`, `--chat-api`, `--upsample-model`, `--show-prompt`,
-`--timeout`, `--seed`, `--steps`, `--sampler`, `--scheduler`, `--negative` and
-`--out`. `edit` uses the first image's dimensions unless you pass `--width` and
+All three accept `--api`, `--chat-api`, `--upsample-model`, `--no-expand`,
+`--show-prompt`, `--timeout`, `--seed`, `--steps`, `--sampler`, `--scheduler`,
+`--negative` and `--out`. `edit` uses the first image's dimensions unless you pass `--width` and
 `--height`.
 
 The service definition lives in `docker-compose.yaml`. Stack setup and

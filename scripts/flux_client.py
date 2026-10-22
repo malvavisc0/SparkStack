@@ -107,6 +107,8 @@ def upsample_prompt(
     images: list[Path],
 ) -> str:
     """Expand a request into a full caption with the local chat model."""
+    if args.no_expand:
+        return prompt
     kind = "i2i" if images else "t2i"
     user: Any = prompt
     if kind == "t2i":
@@ -146,8 +148,6 @@ def sample_settings(args: argparse.Namespace) -> dict[str, Any]:
         settings["sample_method"] = args.sampler
     if args.scheduler:
         settings["scheduler"] = args.scheduler
-    if args.seed is not None:
-        settings["seed"] = args.seed
     return settings
 
 
@@ -163,8 +163,17 @@ def build_payload(
         "width": width,
         "height": height,
     }
+    # sd-server only reads "seed" at the top level; inside sample_params it is
+    # silently ignored, which makes runs non-repeatable even with --seed.
+    if args.seed is not None:
+        payload["seed"] = args.seed
     if args.negative:
         payload["negative_prompt"] = args.negative
+        print(
+            "warning: negative prompts need CFG > 1; this deployment runs "
+            "--cfg-scale 1.0, so the negative prompt has no effect",
+            file=sys.stderr,
+        )
     settings = sample_settings(args)
     if settings:
         payload["sample_params"] = settings
@@ -207,7 +216,10 @@ def cmd_edit(args: argparse.Namespace) -> None:
         base64.b64encode(path.read_bytes()).decode("ascii") for path in args.images
     ]
     payload["init_image"] = encoded[0]
-    payload["ref_images"] = encoded
+    # The init image must not also be a reference: FLUX.3 Klein is
+    # reference-conditioned and reproduces a referenced image instead of editing it.
+    if len(encoded) > 1:
+        payload["ref_images"] = encoded[1:]
     if args.strength is not None:
         payload["strength"] = args.strength
     run_job(args, payload)
@@ -237,6 +249,11 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="prompt upsampler base URL",
     )
     parser.add_argument(
+        "--no-expand",
+        action="store_true",
+        help="send the prompt as-is instead of expanding it with the chat model",
+    )
+    parser.add_argument(
         "--upsample-model",
         default="nemotron-3.5-bolt",
         help="model used to expand the prompt",
@@ -263,7 +280,7 @@ def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--seed",
         type=int,
-        help="fixed seed for repeatable output",
+        help="fixed seed (reproduces composition; pixel noise may still vary)",
     )
     parser.add_argument(
         "--timeout",
@@ -304,15 +321,24 @@ def main() -> None:
 
     hires = sub.add_parser(
         "hires",
-        help="two-pass generation with a latent upscale",
+        help="two-pass generation with an upscaler model",
     )
     add_common(hires)
     hires.add_argument("--width", type=int, default=1024)
     hires.add_argument("--height", type=int, default=1024)
     hires.add_argument("--scale", type=float, default=1.5)
-    hires.add_argument("--denoise", type=float, default=0.45)
-    hires.add_argument("--hires-steps", type=int, default=8)
-    hires.add_argument("--upscaler", default="Latent (nearest-exact)")
+    hires.add_argument("--denoise", type=float, default=0.3)
+    hires.add_argument(
+        "--hires-steps",
+        type=int,
+        default=0,
+        help="second-pass steps (0 reuses --steps; server default)",
+    )
+    hires.add_argument(
+        "--upscaler",
+        default="RealESRGAN_x4",
+        help="hires upscaler name (server default: RealESRGAN_x4)",
+    )
     hires.set_defaults(func=cmd_hires)
 
     args = parser.parse_args()
