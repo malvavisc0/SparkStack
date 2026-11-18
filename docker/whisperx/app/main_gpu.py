@@ -10,11 +10,19 @@ This service provides:
 Built from source to support ARM64 + Blackwell (SM_121) architecture.
 """
 
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
-from contextlib import asynccontextmanager
 import asyncio
-import torch
+import gc
+import logging
+import os
 import re
+import tempfile
+from contextlib import asynccontextmanager
+from typing import NamedTuple
+
+import semver.version
+import torch
+import torchaudio
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 
 # Patch 1: PyTorch 2.6+ changed torch.load default to weights_only=True
 # Pyannote models were saved with older PyTorch and need weights_only=False
@@ -26,7 +34,6 @@ torch.load = _patched_torch_load
 
 # Patch 2: NVIDIA's torch version (2.6.0a0+ecf3bae40a) isn't valid semver
 # Pyannote.audio tries to parse it and fails. Patch semver to handle this.
-import semver.version
 _original_semver_parse = semver.version.VersionInfo.parse
 @classmethod
 def _patched_semver_parse(cls, version):
@@ -41,8 +48,6 @@ semver.version.VersionInfo.parse = _patched_semver_parse
 
 # Patch 3: the torchaudio build in NVIDIA's base image removed some public
 # APIs. Keep no-op shims so any code path that still expects them works.
-import torchaudio
-from typing import NamedTuple
 
 class AudioMetaData(NamedTuple):
     sample_rate: int
@@ -55,12 +60,8 @@ def list_audio_backends():
 torchaudio.AudioMetaData = AudioMetaData
 torchaudio.list_audio_backends = list_audio_backends
 
-import whisperx
-from whisperx.diarize import DiarizationPipeline
-import tempfile
-import os
-import logging
-import gc
+import whisperx  # noqa: E402
+from whisperx.diarize import DiarizationPipeline  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -107,7 +108,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="WhisperX Batch Processing Service (GPU)",
-    description="Perfect transcription with GPU-accelerated speaker diarization. Built for NVIDIA DGX Spark (Blackwell).",
+    description=(
+        "Perfect transcription with GPU-accelerated speaker diarization. "
+        "Built for NVIDIA DGX Spark (Blackwell)."
+    ),
     version="1.1.0-gpu",
     lifespan=lifespan
 )
@@ -131,7 +135,7 @@ async def health():
 
 @app.post("/transcribe")
 async def transcribe_audio(
-    file: UploadFile = File(...),
+    file: UploadFile = File(...),  # noqa: B008
     language: str = Form("auto"),
     num_speakers: int | None = Form(None),
     min_speakers: int | None = Form(None),
@@ -153,7 +157,8 @@ async def transcribe_audio(
     logger.info(f"📥 Received file: {file.filename}")
 
     # Save uploaded file
-    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.filename or "")[1]) as tmp:
+    suffix = os.path.splitext(file.filename or "")[1]
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
@@ -199,7 +204,10 @@ async def transcribe_audio(
         global diarize_pipeline, diarization_disabled
         if not diarization_disabled:
             try:
-                logger.info(f"👥 Step 3: Identifying speakers (device: {diarize_device}) - GPU ACCELERATED!")
+                logger.info(
+                    "👥 Step 3: Identifying speakers (device: %s) - GPU ACCELERATED!",
+                    diarize_device,
+                )
                 if diarize_pipeline is None:
                     diarization_model = os.getenv(
                         "DIARIZATION_MODEL",
@@ -262,7 +270,9 @@ async def transcribe_audio(
 
     except Exception as e:
         logger.error(f"❌ Processing error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="transcription failed — see service logs")
+        raise HTTPException(
+            status_code=500, detail="transcription failed — see service logs"
+        ) from e
 
     finally:
         # Cleanup
