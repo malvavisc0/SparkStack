@@ -59,7 +59,20 @@ RUN cp -r /usr/local/lib/python3.12/dist-packages/torch /tmp/torch_nvidia && \
     cp -r /usr/local/lib/python3.12/dist-packages/numpy /tmp/numpy_nvidia && \
     cp -r /usr/local/lib/python3.12/dist-packages/numpy.libs /tmp/numpy_libs_nvidia 2>/dev/null || true
 
-RUN pip install --no-cache-dir --retries 20 --timeout 120 \
+# Two independent DNS hazards in this build step:
+#  1. The NGC base image's pip.conf adds extra-index-url pypi.ngc.nvidia.com,
+#     an NVIDIA-internal host that is NXDOMAIN outside their network. pip
+#     queries it for every project, gets "Name or service not known", and
+#     retries each one — with --retries 20 that is ~20 min of silent backoff
+#     per project. PIP_CONFIG_FILE=/dev/null ignores that config; every
+#     package below is on public PyPI.
+#  2. Parallel DNS *over UDP* through the Docker bridge drops queries on this
+#     host (166/200 fail in a burst; single and host-network lookups are fine).
+#     RES_OPTIONS=use-vc makes glibc use TCP for DNS, which is 100% reliable.
+# Keep retries small so a real outage fails fast instead of backing off.
+RUN PIP_CONFIG_FILE=/dev/null RES_OPTIONS=use-vc \
+    pip install --no-cache-dir --index-url https://pypi.org/simple \
+        --retries 5 --timeout 30 \
     "fastapi==0.136.0" \
     "faster-whisper==1.2.1" \
     "matplotlib==3.10.8" \
@@ -67,7 +80,10 @@ RUN pip install --no-cache-dir --retries 20 --timeout 120 \
     "pandas==2.2.3" \
     "pyannote.audio==4.0.4" \
     "python-multipart==0.0.26" \
-    "scipy==1.13.1" \
+    # pyannote-metrics 4.x (pulled in by pyannote.audio 4.0.4) requires
+    # scipy>=1.15.1; 1.13.1 makes the resolver fail before it downloads
+    # anything. 1.15.3 still supports the NVIDIA numpy 1.26.4 restored below.
+    "scipy==1.15.3" \
     "semver==3.0.4" \
     "torchcodec==0.11.1" \
     "transformers<5.0.0" \
