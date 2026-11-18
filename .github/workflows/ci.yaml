@@ -21,4 +21,5 @@ jobs:
              --profile audio --profile utility --profile status --profile tools config --quiet
         env:
           HF_TOKEN: ci-placeholder
+          LLM_API_KEY: ci-placeholder
       - run: bash -n sparkstack.sh scripts/watchdog.sh
