@@ -6,14 +6,14 @@
 # deliberate, this is a live dashboard, not an SLA history. To persist, add:
 #   storage: { type: sqlite, path: /data/data.db }  (+ a volume for /data)
 endpoints:
-  - name: Nemotron-3.5-Bolt
+  - name: coder390
     group: apis
-    url: "http://llm-nemotron:8080/health"
+    url: "http://llm-coder390:8888/health"
     interval: 30s
     client: { timeout: 10s }
     conditions: ["[STATUS] == 200"]
 
-  - name: d1-3B
+  - name: d1-2B
     group: apis
     url: "http://d1-decide:8080/health"
     interval: 30s

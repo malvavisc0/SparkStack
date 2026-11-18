@@ -40,26 +40,26 @@
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
     {
-      "id": 5, "type": "stat", "title": "vLLM running",
+      "id": 5, "type": "stat", "title": "SGLang running",
       "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"refId": "A", "expr": "vllm:num_requests_running", "instant": true}],
+      "targets": [{"refId": "A", "expr": "sglang:num_running_reqs", "instant": true}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
     {
-      "id": 6, "type": "stat", "title": "vLLM waiting",
+      "id": 6, "type": "stat", "title": "SGLang waiting",
       "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"refId": "A", "expr": "vllm:num_requests_waiting", "instant": true}],
+      "targets": [{"refId": "A", "expr": "sglang:num_queue_reqs", "instant": true}],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
     {
-      "id": 7, "type": "stat", "title": "vLLM KV cache",
+      "id": 7, "type": "stat", "title": "SGLang token usage",
       "gridPos": {"h": 4, "w": 6, "x": 0, "y": 4},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "targets": [{"refId": "A", "expr": "vllm:kv_cache_usage_perc * 100", "instant": true}],
+      "targets": [{"refId": "A", "expr": "sglang:token_usage * 100", "instant": true}],
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
@@ -88,23 +88,23 @@
       "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "textMode": "auto"}
     },
     {
-      "id": 11, "type": "timeseries", "title": "vLLM tokens/s",
+      "id": 11, "type": "timeseries", "title": "SGLang tokens/s",
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
-        {"refId": "A", "expr": "sum(rate(vllm:generation_tokens_total[5m]))", "legendFormat": "generation"},
-        {"refId": "B", "expr": "sum(rate(vllm:prompt_tokens_total[5m]))", "legendFormat": "prompt"}
+        {"refId": "A", "expr": "sum(rate(sglang:generation_tokens_total[5m]))", "legendFormat": "generation"},
+        {"refId": "B", "expr": "sum(rate(sglang:prompt_tokens_total[5m]))", "legendFormat": "prompt"}
       ],
       "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}
     },
     {
-      "id": 12, "type": "timeseries", "title": "vLLM latency p95",
+      "id": 12, "type": "timeseries", "title": "SGLang latency p95",
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "targets": [
-        {"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))", "legendFormat": "end to end"},
-        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:inter_token_latency_seconds_bucket[5m])))", "legendFormat": "inter token"}
+        {"refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket[5m])))", "legendFormat": "end to end"},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(sglang:inter_token_latency_seconds_bucket[5m])))", "legendFormat": "inter token"}
       ],
       "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}}

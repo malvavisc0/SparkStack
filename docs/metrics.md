@@ -7,7 +7,7 @@ The status profile runs Prometheus, Grafana, node-exporter and a small GPU colle
 | Prometheus | `:9199` | Metrics storage and queries, 30 day retention |
 | Grafana | `:9200` | SparkStack dashboard and ad hoc queries |
 | node-exporter | internal `:9100` | Host CPU, memory, disk and network |
-| vLLM | internal `:8080/metrics` | Chat tokens, queue, latency and KV cache |
+| SGLang | internal `:8888/metrics` | Chat tokens, queue, latency and KV token usage |
 | llama.cpp | internal `:8080/metrics` | Embedding and reranking throughput and queue |
 | GPU collector | textfile | GPU utilization, power, temperature and SM clock |
 
@@ -21,7 +21,7 @@ Grafana has anonymous viewer access on the LAN. The admin user is `admin`; the p
 
 Open <http://192.168.1.10:9200> and choose the **SparkStack** dashboard. Prometheus is at <http://192.168.1.10:9199>.
 
-The dashboard shows GPU utilization, power, temperature and sample age; host CPU and memory; vLLM running and waiting requests; KV cache use; vLLM generated and prompt tokens per second; vLLM p95 end-to-end and inter-token latency; and llama.cpp throughput for embeddings and reranking.
+The dashboard shows GPU utilization, power, temperature and sample age; host CPU and memory; SGLang running and waiting requests; KV token usage; SGLang generated and prompt tokens per second; SGLang p95 end-to-end and inter-token latency; and llama.cpp throughput for embeddings and reranking.
 
 ## GPU collector
 
@@ -40,19 +40,19 @@ These fields work and are collected:
 
 These do not work on GB10 in the usual way:
 
-- Framebuffer used and free: there is no separate framebuffer. Use host memory and the vLLM KV cache metric instead.
+- Framebuffer used and free: there is no separate framebuffer. Use host memory and the SGLang token usage metric instead.
 - DCGM profiling metrics: the profiling module is not loaded on this hardware.
 - Memory copy utilization: the copy engine metric reads zero.
 
-The vLLM `vllm:kv_cache_usage_perc` metric is the useful signal for chat memory pressure. Host memory is available from node-exporter.
+The SGLang `sglang:token_usage` metric (ratio of KV tokens in use, 0–1) is the useful signal for chat memory pressure. Host memory is available from node-exporter. SGLang's `/metrics` is exempt from the chat endpoint's API key, so Prometheus scrapes it without credentials.
 
 ## Useful queries
 
 ```promql
-rate(vllm:generation_tokens_total[5m])
-vllm:num_requests_waiting
-vllm:kv_cache_usage_perc
-histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))
+rate(sglang:generation_tokens_total[5m])
+sglang:num_queue_reqs
+sglang:token_usage
+histogram_quantile(0.95, sum by (le) (rate(sglang:e2e_request_latency_seconds_bucket[5m])))
 sum by (instance) (rate(llamacpp:prompt_tokens_total[5m]))
 node_memory_MemAvailable_bytes
 ```

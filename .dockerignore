@@ -1,0 +1,8 @@
+# Keep build contexts tiny: every compose build uses `context: .`, and none of
+# the Dockerfiles COPY anything from the repo except docker/whisperx/app/.
+models
+data
+vendor
+.git
+.env
+.kilo

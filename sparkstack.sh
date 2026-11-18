@@ -29,8 +29,8 @@ LLAMA_URL="https://github.com/ggml-org/llama.cpp"
 SD_URL="https://github.com/leejet/stable-diffusion.cpp"
 
 # Every profile that has buildable services (so `build` covers them all).
-BUILD_PROFILES=(llm vision utility tools)
-# Default for bare `up`: the whole stack. The 24GB Nemotron build fits in the
+BUILD_PROFILES=(vision utility tools audio)
+# Default for bare `up`: the whole stack. The ~22 GB coder390 build fits in the
 # unified pool alongside image generation, so everything coexists now.
 DEFAULT_UP_PROFILES=(audio utility status llm vision)
 
@@ -54,6 +54,9 @@ ensure_env() {
   load_env
   case "${HF_TOKEN:-}" in
     ""|hf_xxxx*) warn "HF_TOKEN is not set — the gated FLUX.3 download will fail";;
+  esac
+  case "${LLM_API_KEY:-}" in
+    ""|key-xxxx*) warn "LLM_API_KEY is unset or is the .env.example placeholder — set a real key (chat clients and compose need it)";;
   esac
 }
 
@@ -111,7 +114,7 @@ fetch_source() {
 # by WhisperX on its first run. config/tts/ (server script + voices) is committed.
 prepare_layout() {
   log "creating folder layout"
-  mkdir -p "$ROOT/models/nemotron" "$ROOT/models/d1-3B" \
+  mkdir -p "$ROOT/models/coder390-nvfp4" "$ROOT/models/d1-2B" \
             "$ROOT/models/embeddinggemma-2" "$ROOT/models/flux3" \
             "$ROOT/models/flux3/loras" "$ROOT/models/flux3/upscalers" \
             "$ROOT/models/reranker" "$ROOT/models/tts" \
@@ -135,14 +138,14 @@ download_models() { # group: all|llm|image|utility|audio
 
   case "$group" in
     all|llm)
-      # NVIDIA's 24GB build served by vLLM (llm-nemotron) + the DFlash drafter.
-      # Same QAD-compressed weights as the GGUF variant; b12x kernels, 262K ctx.
-      dl nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB          "$MODELS_DIR/nemotron-vllm"
-      dl nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr "$MODELS_DIR/nemotron-vllm-lilicorr" ;;
+      # coder390 NVFP4 W4A16 tier (text + vision + MTP) and its DFlash2 draft;
+      # 'NVFP4/W4A16/*' already covers the DFlash2-FP8 subdir (fnmatch * crosses /).
+      dl nerkyor/Qwen3.8-27B-Coder390-EfficientThink-Opus5.5-GPT6Astra-Grok4.7-DSV4Pro-K3-SFT-RLOO-MTP-DFlash2 \
+         "$MODELS_DIR/coder390-nvfp4" --include 'NVFP4/W4A16/*' ;;
   esac
   case "$group" in
     all|utility)
-      dl LiquidAI/d1-3B-GGUF           "$MODELS_DIR/d1-3B"          --include '*Q8_0*'
+      dl LiquidAI/d1-2B-GGUF           "$MODELS_DIR/d1-2B"          --include '*Q8_0*'
       dl unsloth/embeddinggemma-2-GGUF "$MODELS_DIR/embeddinggemma-2" --include '*Q8_0*'
       dl Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp \
          "$MODELS_DIR/reranker" --include 'Qwen3-Reranker-0.6B.Q8_0.gguf' ;;
@@ -170,16 +173,16 @@ verify_models() { # group
   case "$group" in
     all|llm)
       files+=(
-        nemotron-vllm/model.safetensors.index.json
-        nemotron-vllm/tokenizer.json
-        nemotron-vllm-lilicorr/config.json
+        coder390-nvfp4/NVFP4/W4A16/config.json
+        coder390-nvfp4/NVFP4/W4A16/model.safetensors.index.json
+        coder390-nvfp4/NVFP4/W4A16/DFlash2-FP8/model.safetensors
       ) ;;
   esac
   case "$group" in
     all|utility)
       files+=(
-        d1-3B/d1-3B-Q8_0.gguf
-        d1-3B/mmproj-d1-3B-Q8_0.gguf
+        d1-2B/d1-2B-Q8_0.gguf
+        d1-2B/mmproj-d1-2B-Q8_0.gguf
         embeddinggemma-2/embeddinggemma-2-Q8_0.gguf
         embeddinggemma-2/mmproj-Q8_0.gguf
         reranker/Qwen3-Reranker-0.6B.Q8_0.gguf
@@ -243,8 +246,7 @@ profile_running() { docker compose --profile "$1" ps --status running -q 2>/dev/
 build() {
   ensure_docker
   local args=(); for p in "${BUILD_PROFILES[@]}"; do args+=(--profile "$p"); done
-  # --pull refreshes base images: rolling tags (vllm cu134-nightly) pick up new
-  # builds, stable tags (nvidia/cuda:13.0.0-*) are a no-op.
+  # --pull refreshes build base images.
   log "docker compose ${args[*]} build --pull"
   docker compose "${args[@]}" build --pull
 }
@@ -254,8 +256,10 @@ up() {
   local profiles=("$@")
   [ ${#profiles[@]} -eq 0 ] && profiles=("${DEFAULT_UP_PROFILES[@]}")
   local args=(); for p in "${profiles[@]}"; do args+=(--profile "$p"); done
-  log "docker compose ${args[*]} up -d"
-  docker compose "${args[@]}" up -d
+  # --remove-orphans: cleans up containers left by renamed/removed services
+  # (e.g. the old llm-nemotron after the coder390 switch)
+  log "docker compose ${args[*]} up -d --remove-orphans"
+  docker compose "${args[@]}" up -d --remove-orphans
 }
 
 # Every profile, so `down` actually stops everything (bare `docker compose
@@ -265,8 +269,8 @@ DOWN_PROFILES=(audio utility status llm vision tools)
 down() {
   ensure_docker
   local args=(); for p in "${DOWN_PROFILES[@]}"; do args+=(--profile "$p"); done
-  log "docker compose ${args[*]} down"
-  docker compose "${args[@]}" down
+  log "docker compose ${args[*]} down --remove-orphans"
+  docker compose "${args[@]}" down --remove-orphans
 }
 ps()      { ensure_docker; docker compose ps; }
 logs()    { ensure_docker; [ $# -ge 1 ] || die "usage: ./sparkstack.sh logs <service>"; docker compose logs -f "$@"; }
@@ -279,14 +283,16 @@ logs()    { ensure_docker; [ $# -ge 1 ] || die "usage: ./sparkstack.sh logs <ser
 TEST_FAILURES=0
 
 post_json() { # port path json -> prints response body
-  curl -fsS -m 300 -H 'Content-Type: application/json' -d "$3" "http://localhost:$1$2"
+  local auth=()
+  [ -n "${LLM_API_KEY:-}" ] && auth=(-H "Authorization: Bearer ${LLM_API_KEY}")
+  curl -fsS -m 300 -H 'Content-Type: application/json' "${auth[@]}" -d "$3" "http://localhost:$1$2"
 }
 
 test_service() { # name  — runs one check; records failure
   local name="$1"
   case "$name" in
-    d1-decide|embeddings|reranker|llm-nemotron|image-flux3|whisper-x|tts-voicedesign|status|prometheus|grafana|gpu-exporter) ;;
-    *) die "unknown service '$name' (d1-decide|embeddings|reranker|llm-nemotron|image-flux3|whisper-x|tts-voicedesign|status|prometheus|grafana|gpu-exporter)" ;;
+    d1-decide|embeddings|reranker|llm-coder390|image-flux3|whisper-x|tts-voicedesign|status|prometheus|grafana|gpu-exporter) ;;
+    *) die "unknown service '$name' (d1-decide|embeddings|reranker|llm-coder390|image-flux3|whisper-x|tts-voicedesign|status|prometheus|grafana|gpu-exporter)" ;;
   esac
   if [ "$(compose_ps_status "$name")" != "running" ]; then
     warn "$name: not running — skipping (start it with: ./sparkstack.sh up)"
@@ -319,12 +325,13 @@ wait_healthy() { # service timeout_s — wait for compose healthcheck
   return 1
 }
 
-# d1-decide: health + a real completion (warms CUDA paths + the chat route)
+# d1-decide: health + a real decision (warms the systemone route)
 check_d1-decide() {
   local port reply
   port="$(svc_port d1-decide)" && curl -fsS -m 10 "http://localhost:$port/health" >/dev/null \
- && reply="$(post_json "$port" /v1/chat/completions '{"model":"d1-3B","messages":[{"role":"user","content":"Say OK"}],"max_tokens":5}')" \
- && echo "    d1-decide: /health ok, chat replied: $(echo "$reply" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])')"
+ && reply="$(post_json "$port" /v1/systemone '{"state":"warmup","questions":{"ready":{"type":"noul","instructions":"Is the service ready?"}}}')" \
+ && echo "$reply" | python3 -c 'import json,sys; d=json.load(sys.stdin); assert "answers" in d' \
+ && echo "    d1-decide: /health ok, systemone replied"
 }
 
 # embeddings: health + a real embedding (warms the multimodal text path)
@@ -366,13 +373,13 @@ check_gpu-exporter() {
   echo "    gpu-exporter: sample ${age}s old"
 }
 
-# llm-nemotron: health (vLLM cold load takes minutes) + a real chat completion
-check_llm-nemotron() {
+# llm-coder390: health (SGLang cold load takes minutes) + a real chat completion
+check_llm-coder390() {
   local port reply
-  port="$(svc_port llm-nemotron)"
-  wait_healthy llm-nemotron 600 \
- && reply="$(post_json "$port" /v1/chat/completions '{"model":"nemotron-3.5-bolt","messages":[{"role":"user","content":"Reply with exactly: OK"}],"max_tokens":200}')" \
- && echo "    llm-nemotron: chat replied: $(echo "$reply" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])')"
+  port="$(svc_port llm-coder390 8888)"
+  wait_healthy llm-coder390 900 \
+ && reply="$(post_json "$port" /v1/chat/completions '{"model":"coder390","messages":[{"role":"user","content":"Reply with exactly: OK"}],"max_tokens":16,"temperature":0,"chat_template_kwargs":{"enable_thinking":false}}')" \
+ && echo "    llm-coder390: chat replied: $(echo "$reply" | python3 -c 'import json,sys; print(json.load(sys.stdin)["choices"][0]["message"]["content"])')"
 }
 
 # image-flux3: a real 512x512 generation (warm ~7s; also warms the diffusion
@@ -386,9 +393,10 @@ check_image-flux3() {
 }
 
 # whisper-x: health endpoint; a real transcription needs an audio file, so this
-# warms the HTTP path only (model loads on first real request)
+# warms the HTTP path only (Whisper loads at startup; the align and diarization
+# models load on the first real request)
 check_whisper-x() {
-  wait_healthy whisper-x 300 \
+  wait_healthy whisper-x 600 \
  && curl -fsS -m 60 "http://localhost:$(svc_port whisper-x 8003)/health" >/dev/null \
  && echo "    whisper-x: /health ok (cuda, whisper-large-v3)"
 }
@@ -411,9 +419,10 @@ check_status() {
 
 cmd_test() {
   ensure_docker
+  ensure_env
   TEST_SKIPPED=0
   local svc
-  for svc in d1-decide embeddings reranker llm-nemotron image-flux3 whisper-x tts-voicedesign status prometheus grafana gpu-exporter; do
+  for svc in d1-decide embeddings reranker llm-coder390 image-flux3 whisper-x tts-voicedesign status prometheus grafana gpu-exporter; do
     test_service "$svc" || true
   done
   if [ "$TEST_FAILURES" -gt 0 ]; then
@@ -438,9 +447,10 @@ cmd_install() {
 cmd_update() {
   ensure_env
   build
-  # recreate any profiles that are currently running
+  # recreate any profiles that are currently running (llm has no build target
+  # but still needs recreation when its compose config or image tag changes)
   local running=()
-  for p in "${BUILD_PROFILES[@]}" audio status; do
+  for p in "${BUILD_PROFILES[@]}" llm status; do
     if profile_running "$p"; then running+=("$p"); fi
   done
   [ ${#running[@]} -gt 0 ] && up "${running[@]}" || log "nothing was running; start with: ./sparkstack.sh up"

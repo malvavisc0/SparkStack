@@ -11,9 +11,11 @@ scrape_configs:
     static_configs:
       - targets: ["node-exporter:9100"]
 
-  - job_name: vllm
+  - job_name: sglang
+    # /metrics is exempt from the chat endpoint's --api-key (verified), so no
+    # credentials are needed here.
     static_configs:
-      - targets: ["llm-nemotron:8080"]
+      - targets: ["llm-coder390:8888"]
 
   - job_name: llama-embeddings
     static_configs:

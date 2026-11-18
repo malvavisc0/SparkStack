@@ -1,12 +1,14 @@
 # ============================================================================
-# SparkStack — one Dockerfile, four targets. Compose picks one per service:
+# SparkStack — one Dockerfile, three targets. Compose picks one per service:
 #
 #   target          service(s)                        profile
 #   ──────────────  ────────────────────────────────  ──────────
-#   llama-runtime   d1-decide, embeddings             utility
+#   llama-runtime   d1-decide, embeddings, reranker   utility
 #   tools-runtime   tools (one-shot downloads/bench)  tools
 #   sd-runtime      image-flux3                       vision
-#   vllm-runtime    llm-nemotron                      llm
+#
+# The chat service (llm-coder390, profile llm) runs the pulled SGLang image;
+# the WhisperX image builds from docker/whisperx/Dockerfile.
 #
 # Compiled for GB10 (sm_121) / CUDA 13.
 # Update everything: ./sparkstack.sh update  (pulls fresh bases, rebuilds)
@@ -86,22 +88,3 @@ ENV PATH=/opt/sd/bin:$PATH \
     LD_LIBRARY_PATH=/opt/sd/bin
 EXPOSE 8080
 # no ENTRYPOINT: the compose command names the binary (sd-server …)
-
-
-# ── vLLM ─────────────────────────────────────────────────────────────────────
-# Recipe: huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB
-# Rolling tag by policy: `update` pulls the current build; if a nightly breaks
-# the recipe, pin the tag by digest until the next good one.
-
-# Image digest pinned to the NVIDIA recipe (the rolling cu134-nightly segfaults
-# in b12x MoE kernels on first inference). Update the pin when NVIDIA updates
-# the recipe: huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB
-FROM vllm/vllm-openai:nightly-77154ca6116ae34cbfe314beef1016bde9b63989 AS vllm-runtime
-# flashinfer invoked directly because vLLM's CLI parser does NVML device
-# inference at startup and dies in a GPU-less build. /app must be created.
-RUN mkdir -p /app \
- && curl -fsSL -o /app/ultra_v3_reasoning_parser.py \
-      https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB/resolve/main/ultra_v3_reasoning_parser.py \
- && pip install --no-cache-dir b12x \
- && python3 -m flashinfer download-kernels
-ENV VLLM_USE_V2_MODEL_RUNNER=1

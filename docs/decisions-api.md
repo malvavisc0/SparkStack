@@ -1,6 +1,6 @@
 # One-shot decisions
 
-The `d1-decide` service runs LiquidAI d1-3B on port `:9194`. It reads a state and
+The `d1-decide` service runs LiquidAI d1-2B on port `:9194`. It reads a state and
 returns probabilities for a set of questions. It is not a chat model: output
 tokens are always zero, and a request takes about 0.1 s for text or 0.2 s when
 an image is attached. Use it for routing, triage, labels and scores when a full
@@ -143,6 +143,12 @@ Measured timings on the Spark:
 
 ## Troubleshooting
 
+- `501 This model is a decision model without text generation, use
+  /v1/systemone`: the client is calling `/v1/chat/completions`. d1-2B has no
+  text generation, so llama.cpp rejects chat requests on purpose. Send typed
+  questions to `/v1/systemone` instead. If the client genuinely needs chat,
+  point it at the chat service on `:9193` with `"model": "coder390"` and the
+  `LLM_API_KEY` bearer token.
 - `400 "state" must be provided`: send a state, even an empty string or object.
 - `400 "questions" must be a non-empty object`: the questions payload is missing
   or empty.

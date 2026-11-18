@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one-shot decisions against the SparkStack d1-3B service."""
+"""Run one-shot decisions against the SparkStack d1-2B service."""
 
 import argparse
 import json

@@ -33,16 +33,24 @@ def send_request(
         raise SystemExit(f"cannot reach {url}: {error.reason}") from error
 
 
+def auth_headers(api_key: str | None = None) -> dict[str, str]:
+    """Authorization headers for services that require a bearer token."""
+    if not api_key:
+        return {}
+    return {"Authorization": f"Bearer {api_key}"}
+
+
 def request_bytes(
     url: str,
     *,
     payload: Mapping[str, Any] | None = None,
     timeout: float = 600,
     method: str = "POST",
+    api_key: str | None = None,
 ) -> bytes:
     """Send a JSON request or a plain request and return the raw body."""
     data = None
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = auth_headers(api_key)
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -56,9 +64,12 @@ def request_json(
     payload: Mapping[str, Any] | None = None,
     timeout: float = 600,
     method: str = "POST",
+    api_key: str | None = None,
 ) -> Any:
     """Send a request and decode its JSON response."""
-    body = request_bytes(url, payload=payload, timeout=timeout, method=method)
+    body = request_bytes(
+        url, payload=payload, timeout=timeout, method=method, api_key=api_key
+    )
     return json.loads(body)
 
 

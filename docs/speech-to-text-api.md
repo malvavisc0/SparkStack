@@ -1,12 +1,20 @@
 # Speech to text
 
-The `whisper-x` service runs WhisperX `large-v3-turbo` on port `:9191`. It
-transcribes an audio file, adds word timings, and assigns speaker labels. The
-route is `POST /transcribe` with multipart form data.
+The `whisper-x` service runs WhisperX 3.8.6 with Whisper `large-v3` on port
+`:9191`. It transcribes an audio file, adds word timings, and assigns speaker
+labels. The route is `POST /transcribe` with multipart form data.
 
-Diarization runs by default on this deployment. A warm request took 4.1 s for an
-8.7 s two-speaker clip. The first request after a restart took 21 s while the
-model loaded. A 41.5 s narration took 8.7 s to transcribe.
+Diarization runs by default on this deployment and uses the GPU. A warm
+transcription of the short update-check clip took 3.4 s. An 8.7 s two-speaker
+clip took 4.1 s on the previous build, and a 41.5 s narration took 8.7 s. The
+first request after a restart can take several minutes while the alignment and
+diarization models load.
+
+This build uses WhisperX 3.8.6 with the pyannote 3.1 diarization pipeline. The
+pipeline uses AgglomerativeClustering, so it does not load the gated
+community-1 PLDA model. If diarization cannot be loaded, the service returns
+the transcription without speaker labels and logs a warning; restart it after
+fixing access.
 
 ## Quick start
 

@@ -8,7 +8,7 @@ everything else on your LAN — agents, apps, other machines — are its clients
 
 | Port | Endpoint | Serves |
 |---|---|---|
-| `:9193` | `POST /v1/chat/completions` | 74B chat + vision |
+| `:9193` | `POST /v1/chat/completions` | 27B chat + vision |
 | `:9194` | `POST /v1/systemone` | one-shot decisions (yes/no/score) |
 | `:9195` | `POST /v1/embeddings` | text/image/video/audio embeddings |
 | `:9198` | `POST /v1/rerank` | cross-encoder reranking |
@@ -33,15 +33,13 @@ AI backend with no API bills, no rate limits, no data leaving your LAN.
 Good for private coding agents, RAG over your own documents and media, local voice
 assistants, batch image generation, and routing/triage inside agent loops.
 
-**Everything runs at once.** The chat model is NVIDIA's own 24 GB build of
-Nemotron-3.5-Bolt-74B — a compressed-and-retrained (quantization-aware
-distillation) version of the 74B model, designed by NVIDIA to run alongside other
-applications. It beats full-precision models of similar size on agentic benchmarks
-(Terminal-Bench 51 vs Qwen3.6-35B's 44, GPQA 86 vs 83, BrowseComp 67 vs 49), served
-by **vLLM** with b12x tensor-core kernels, 256K context and DFlash speculative
-decoding (7 draft tokens). Everything else — decisions, embeddings — runs on
+**Everything runs at once.** The chat model is coder390, a Qwen3.8-27B
+post-train in NVFP4 W4A16 with text and image input. SGLang serves it with
+DFlash2 speculative decoding, the full 262K context and tool calling. The
+NVFP4 tier scores GPQA 170/198, MMLU 439/500 and LCB 91/100, and runs at about
+53–61 tokens/s on the Spark. Decisions, embeddings and reranking run on
 llama.cpp; images on stable-diffusion.cpp. The whole stack fits in the Spark's
-128 GB unified memory with ~35 GB to spare at idle.
+128 GB unified memory with roughly 17 GiB to spare at idle.
 
 ## Install (on the Spark)
 
@@ -52,7 +50,7 @@ the rest Docker images). `install` checks the tooling and installs `uv` if neede
 
    ```bash
    git clone https://github.com/malvavisc0/SparkStack.git && cd SparkStack
-   cp .env.example .env    # put your Hugging Face token in .env
+   cp .env.example .env    # put your Hugging Face token and LLM_API_KEY in .env
    ```
 
    (Token: huggingface.co → Settings → Access Tokens.)
@@ -68,9 +66,9 @@ the rest Docker images). `install` checks the tooling and installs `uv` if neede
    ./sparkstack.sh install
    ```
 
-`install` downloads the models (~43 GB), builds the images (llama.cpp,
-stable-diffusion.cpp, and NVIDIA's recipe-pinned vLLM image with b12x kernels)
-for the GB10 GPU, starts everything, and prints the endpoint map — everything
+`install` downloads the models (~41 GB), builds the llama.cpp and
+stable-diffusion.cpp images for the GB10 GPU, pulls the SGLang image, starts
+everything, and prints the endpoint map — everything
 your clients need. On this box it's `192.168.1.10`; check
 <http://192.168.1.10:9190> (all cards green = healthy). After the first
 `install` or `up`, run `./sparkstack.sh test` — it waits for each service to
@@ -101,16 +99,19 @@ Full guide: [docs/chat-api.md](docs/chat-api.md). The Python client is
 
 ```bash
 curl http://192.168.1.10:9193/v1/chat/completions \
+  -H "Authorization: Bearer $LLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
-    "model": "nemotron-3.5-bolt",
+    "model": "coder390",
     "messages": [{"role": "user", "content": "Explain unified memory in one paragraph."}]
   }'
 ```
 
-Send images by adding an `image_url` content part. 256K context, tool calling
-and reasoning follow the model's chat template. With the OpenAI SDK, set
-`base_url="http://<spark>:9193/v1"`; the API key is ignored.
+Send images by adding an `image_url` content part. SGLang serves the full 262K
+context with DFlash2 speculative decoding, tool calling and reasoning through
+the model's chat template. The endpoint requires the `LLM_API_KEY` from `.env`
+and returns HTTP 401 without it. With the OpenAI SDK, set
+`base_url="http://<spark>:9193/v1"` and pass the same key as `api_key`.
 
 ### Speech-to-text — `:9191`
 
@@ -121,7 +122,8 @@ client is [scripts/transcribe_client.py](scripts/transcribe_client.py).
 curl http://192.168.1.10:9191/transcribe -F file=@sample.wav -F language=en
 ```
 
-WhisperX `large-v3-turbo`, batched on GPU, with diarization and word timings.
+WhisperX 3.8.6 with Whisper `large-v3`, batched on GPU, with diarization and
+word timings.
 
 ### Text-to-speech — `:9192`
 
@@ -259,7 +261,7 @@ curl http://192.168.1.10:9196/sdcpp/v1/img_gen \
 - **<http://192.168.1.10:9197>** — Dozzle: live logs of every container, searchable.
   It also exposes an MCP endpoint at `/api/mcp` so agents can query the logs
   directly (requires the MCP initialize handshake).
-- **<http://192.168.1.10:9199>** — Prometheus: vLLM and llama.cpp metrics, 30 day retention.
+- **<http://192.168.1.10:9199>** — Prometheus: SGLang and llama.cpp metrics, 30 day retention.
 - **<http://192.168.1.10:9200>** — Grafana: the SparkStack dashboard. Anonymous
   viewers can read; the admin password comes from `GRAFANA_ADMIN_PASSWORD`.
   The GPU collector runs in the status profile. See [docs/metrics.md](docs/metrics.md).
@@ -299,17 +301,20 @@ sudo systemctl enable --now watchdog.timer
 ## Reference
 
 **Hardware**: designed and budgeted for the DGX Spark (GB10, 128 GB unified
-memory, `sm_121`). Chat at NVIDIA's native 2-bit (24 GB build), the rest
-quantized or FP16 → ~85 GiB resident at idle, ~35 GiB available.
+memory, `sm_121`). Chat at NVFP4 W4A16 (about 22 GB of weights including the
+DFlash2 draft) with a 262K context, the rest quantized or FP16 → ~104 GiB
+resident at idle, ~17 GiB available; long prompts consume the KV reserve.
 
-**Layout**: `models/` (weights, ~43 GB, git-ignored — includes `flux3/loras/`
-and `flux3/upscalers/` add-on dirs, scanned live) · `data/` (whisper cache,
-watchdog log, GPU textfile, git-ignored) · `config/` (dashboards, TTS server +
-voices, diffusion presets, prompt templates, Prometheus, Grafana, committed) ·
-`.env` (your token, git-ignored).
+**Layout**: `models/` (weights, ~41 GB for the set the services use,
+git-ignored — includes `flux3/loras/` and `flux3/upscalers/` add-on dirs,
+scanned live) · `data/` (whisper cache, SGLang and FlashInfer caches, watchdog
+log, GPU textfile, git-ignored) · `config/` (dashboards, TTS server + voices,
+diffusion presets, prompt templates, Prometheus, Grafana, committed) ·
+`.env` (your tokens, git-ignored).
 
-**Security**: no auth anywhere — it's for a trusted LAN. Anyone who can reach the
-host can call every model; Dozzle mounts `docker.sock` and runs with
+**Security**: the chat endpoint requires `LLM_API_KEY` from `.env` as a bearer
+token (`--api-key` on SGLang). Everything else is unauthenticated and open to
+anyone who can reach the host. Dozzle mounts `docker.sock` and runs with
 `DOZZLE_ENABLE_ACTIONS` + `DOZZLE_ENABLE_SHELL`, so it can start/stop containers
 and `exec` a shell into them from the UI (the `:ro` on the socket mount is
 cosmetic — it does not block API writes). Anyone who can reach Dozzle has the
@@ -320,13 +325,21 @@ port-forward the 919x block.
 **Troubleshooting**
 
 - First `up audio` is slow — WhisperX downloads its model then; subsequent starts are instant.
-- First `up llm` takes ~7 minutes — vLLM cold-loads 24 GB of weights (plus the
-  DFlash drafter); `test` waits for it. Don't cold-boot two heavy services at
-  once — concurrent cold loads (e.g. TTS restarting while vLLM loads) can
+- First `up llm` takes ~2–3 minutes — SGLang loads 22 GB of weights plus the
+  DFlash2 draft and captures decode CUDA graphs. Prefill graphs are disabled on
+  purpose: they add ~3 minutes to every boot for no measurable gain at this
+  concurrency. `test` waits for it. Don't cold-boot two heavy services at once —
+  concurrent cold loads (e.g. TTS restarting while the chat model loads) can
   wedge GB10's unified memory. `up` then `test`, in that order.
-- The vLLM image is pinned to the digest NVIDIA's recipe specifies (rolling
-  nightlies segfault in the b12x MoE kernels). When NVIDIA updates the recipe,
-  update the `FROM` digest in `Dockerfile` (marked with a comment).
+- Long prompts are prefill-bound: ~1,100 tok/s, so a 128K prompt takes about
+  2.5 minutes before the first token and a full 262K prompt about 4 minutes.
+  Decode speed is unaffected.
+- The SGLang cache lives in `data/sglang-cache`, so FlashInfer autotune results
+  and compiled kernels survive restarts. Deleting that folder forces a re-tune.
+- SGLang is pinned by image tag, not by a nightly digest; the model needs the
+  DFlash2 and quantized-head support in the `dev-qwen38-27b-dflash2` build.
+  Test a new tag before switching, and update the `image:` line in
+  `docker-compose.yaml`.
 - TTS 503 — model still loading; watch the status card turn green.
 - Card red on :9190 — service down, or its profile isn't started (expected for `llm`/`vision` unless you started them).
 - Machine feels starved during a 4K image run — the watchdog stops `vision` automatically below 3 GiB available; check `data/watchdog.log`.

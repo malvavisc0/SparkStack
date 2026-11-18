@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chat with the SparkStack Nemotron service."""
+"""Chat with the SparkStack coder390 service."""
 
 import argparse
 import json
@@ -11,9 +11,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from client_support import fail, image_part, request_json
+from client_support import auth_headers, fail, image_part, request_json
 
 DEFAULT_API = os.environ.get("SPARKSTACK_CHAT_URL", "http://localhost:9193")
+DEFAULT_API_KEY = os.environ.get("LLM_API_KEY")
 
 
 def load_messages(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -57,17 +58,13 @@ def build_payload(
         "messages": messages,
         "temperature": args.temperature,
         "top_p": args.top_p,
+        "top_k": args.top_k,
         "max_tokens": args.max_tokens,
     }
     if args.seed is not None:
         payload["seed"] = args.seed
     if args.no_thinking:
         payload["chat_template_kwargs"] = {"enable_thinking": False}
-    elif args.medium_effort:
-        payload["chat_template_kwargs"] = {
-            "enable_thinking": True,
-            "medium_effort": True,
-        }
     if args.tools:
         try:
             tools = json.loads(Path(args.tools).read_text())
@@ -105,13 +102,15 @@ def run_stream(
     timeout: float,
     show_reasoning: bool,
     show_stats: bool,
+    api_key: str | None = None,
 ) -> None:
     """Stream a chat completion and print the answer."""
     body = json.dumps(payload).encode("utf-8")
+    headers = auth_headers(api_key) | {"Content-Type": "application/json"}
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json"},
+        headers=headers,
     )
     started = time.monotonic()
     ttft: float | None = None
@@ -180,10 +179,13 @@ def run_complete(
     show_reasoning: bool,
     show_stats: bool,
     as_json: bool,
+    api_key: str | None = None,
 ) -> None:
     """Run a non-streaming completion and print the result."""
     started = time.monotonic()
-    response: dict[str, Any] = request_json(url, payload=payload, timeout=timeout)
+    response: dict[str, Any] = request_json(
+        url, payload=payload, timeout=timeout, api_key=api_key
+    )
     elapsed = time.monotonic() - started
     if as_json:
         print(json.dumps(response, indent=2))
@@ -222,13 +224,14 @@ def main() -> None:
     )
     parser.add_argument("--system", help="system prompt")
     parser.add_argument("--image", type=Path, help="image to attach")
-    parser.add_argument("--model", default="nemotron-3.5-bolt")
-    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--model", default="coder390")
+    parser.add_argument("--temperature", type=float, default=0.6)
     parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=16384,
+        default=8192,
         help="shared budget for reasoning and answer",
     )
     parser.add_argument("--seed", type=int)
@@ -236,11 +239,6 @@ def main() -> None:
         "--no-thinking",
         action="store_true",
         help="disable reasoning for low latency",
-    )
-    parser.add_argument(
-        "--medium-effort",
-        action="store_true",
-        help="enable thinking with medium effort",
     )
     parser.add_argument(
         "--tools",
@@ -265,11 +263,14 @@ def main() -> None:
     )
     parser.add_argument("--json", action="store_true", help="print the raw response")
     parser.add_argument("--api", default=DEFAULT_API, help="service base URL")
+    parser.add_argument(
+        "--api-key",
+        default=DEFAULT_API_KEY,
+        help="bearer token for the chat endpoint (default: LLM_API_KEY)",
+    )
     parser.add_argument("--timeout", type=float, default=600)
     args = parser.parse_args()
 
-    if args.no_thinking and args.medium_effort:
-        parser.error("--no-thinking and --medium-effort cannot be combined")
     if args.tool_choice and not args.tools:
         parser.error("--tool-choice requires --tools")
     if args.tools and args.stream:
@@ -281,7 +282,14 @@ def main() -> None:
     payload = build_payload(args, messages)
     url = args.api.rstrip("/") + "/v1/chat/completions"
     if args.stream:
-        run_stream(url, payload, args.timeout, args.show_reasoning, args.stats)
+        run_stream(
+            url,
+            payload,
+            args.timeout,
+            args.show_reasoning,
+            args.stats,
+            args.api_key,
+        )
     else:
         run_complete(
             url,
@@ -290,6 +298,7 @@ def main() -> None:
             args.show_reasoning,
             args.stats,
             args.json,
+            args.api_key,
         )
 
 

@@ -129,6 +129,7 @@ def upsample_prompt(
         args.chat_api.rstrip("/") + "/v1/chat/completions",
         payload=payload,
         timeout=args.timeout,
+        api_key=args.chat_api_key,
     )
     content = response["choices"][0]["message"].get("content")
     if not isinstance(content, str) or not content.strip():
@@ -249,13 +250,18 @@ def add_common(parser: argparse.ArgumentParser) -> None:
         help="prompt upsampler base URL",
     )
     parser.add_argument(
+        "--chat-api-key",
+        default=os.environ.get("LLM_API_KEY"),
+        help="bearer token for the prompt upsampler (default: LLM_API_KEY)",
+    )
+    parser.add_argument(
         "--no-expand",
         action="store_true",
         help="send the prompt as-is instead of expanding it with the chat model",
     )
     parser.add_argument(
         "--upsample-model",
-        default="nemotron-3.5-bolt",
+        default="coder390",
         help="model used to expand the prompt",
     )
     parser.add_argument(
