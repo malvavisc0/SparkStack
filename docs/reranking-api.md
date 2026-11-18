@@ -27,7 +27,7 @@ Use `--doc-file` to read one document per line, `--top-n` to keep only the best 
 ## Request
 
 ```bash
-curl http://192.168.1.10:9198/v1/rerank \
+curl http://spark:9198/v1/rerank \
   -H 'Content-Type: application/json' \
   -d '{
     "query": "employment termination notice period",

@@ -35,7 +35,7 @@ The endpoint is `POST /v1/chat/completions`. It requires the `LLM_API_KEY` from
 `.env` as a bearer token; requests without it return HTTP 401.
 
 ```bash
-curl http://192.168.1.10:9193/v1/chat/completions \
+curl http://spark:9193/v1/chat/completions \
   -H "Authorization: Bearer $LLM_API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -151,7 +151,7 @@ image options.
 ]
 ```
 
-With the OpenAI SDK, set `base_url="http://<spark>:9193/v1"` and pass the
+With the OpenAI SDK, set `base_url="http://spark:9193/v1"` and pass the
 `LLM_API_KEY` value as `api_key`. Requests with a missing or wrong key return
 HTTP 401.
 

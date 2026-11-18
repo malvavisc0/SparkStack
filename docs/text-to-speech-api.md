@@ -42,7 +42,7 @@ language. Use the matching voice and language for non-English text.
 ## Request
 
 ```bash
-curl http://192.168.1.10:9192/v1/audio/speech \
+curl http://spark:9192/v1/audio/speech \
   -H 'Content-Type: application/json' \
   -d '{"input": "SparkStack is up.", "voice": "vd_british_male"}' \
   --output hello.wav

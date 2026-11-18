@@ -30,7 +30,7 @@ service at `http://localhost:9193` by default. Point it at another host with
 
 ```bash
 ./scripts/flux_client.py generate "a red fox in a snowy forest" \
-  --api http://192.168.1.10:9196 --chat-api http://192.168.1.10:9193 \
+  --api http://spark:9196 --chat-api http://spark:9193 \
   --out fox.png
 ```
 
@@ -60,7 +60,7 @@ route does not expand prompts; the example uses a caption rather than a short
 request:
 
 ```bash
-curl -s http://192.168.1.10:9196/v1/images/generations \
+curl -s http://spark:9196/v1/images/generations \
   -H 'Content-Type: application/json' \
   -d '{"prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, its orange fur catching the last light, dark evergreens behind it and soft snow in the foreground.", "size": "1024x1024"}' \
   | python3 -c 'import json,sys,base64; open("fox.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
@@ -90,7 +90,7 @@ scene, not only the change. The Python client expands the instruction first,
 using the first image as context.
 
 ```bash
-curl -s http://192.168.1.10:9196/v1/images/edits \
+curl -s http://spark:9196/v1/images/edits \
   -F 'prompt=change the mug to bright blue, keep everything else the same' \
   -F image=@mug.png \
   | python3 -c 'import json,sys,base64; open("mug-blue.png","wb").write(base64.b64decode(json.load(sys.stdin)["data"][0]["b64_json"]))'
@@ -125,7 +125,7 @@ img2img is the path that works.
 Submit a job to `POST /sdcpp/v1/img_gen`:
 
 ```bash
-curl -s http://192.168.1.10:9196/sdcpp/v1/img_gen \
+curl -s http://spark:9196/sdcpp/v1/img_gen \
   -H 'Content-Type: application/json' \
   -d '{
     "prompt": "Full-color outdoor photograph, a red fox stands in a snowy forest at dusk, orange fur catching the last light, dark evergreens behind it.",
@@ -145,7 +145,7 @@ The service returns a job with an id, a status and a poll URL:
 Poll the URL until `status` is `completed` or `failed`:
 
 ```bash
-curl -s http://192.168.1.10:9196/sdcpp/v1/jobs/job_6ad37833_00000000
+curl -s http://spark:9196/sdcpp/v1/jobs/job_6ad37833_00000000
 ```
 
 A completed job stores the image at `result.images[0].b64_json`. The `error`

@@ -41,7 +41,7 @@ values. Use `--json` for the raw response and `--out vectors.json` to save it.
 Plain strings are the simplest input:
 
 ```bash
-curl http://192.168.1.10:9195/v1/embeddings \
+curl http://spark:9195/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"input": ["hello world", "a second sentence"]}'
 ```

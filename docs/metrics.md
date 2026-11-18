@@ -19,7 +19,7 @@ Grafana has anonymous viewer access on the LAN. The admin user is `admin`; the p
 ./sparkstack.sh up status
 ```
 
-Open <http://192.168.1.10:9200> and choose the **SparkStack** dashboard. Prometheus is at <http://192.168.1.10:9199>.
+Open <http://spark:9200> and choose the **SparkStack** dashboard. Prometheus is at <http://spark:9199>.
 
 The dashboard shows GPU utilization, power, temperature and sample age; host CPU and memory; SGLang running and waiting requests; KV token usage; SGLang generated and prompt tokens per second; SGLang p95 end-to-end and inter-token latency; and llama.cpp throughput for embeddings and reranking.
 

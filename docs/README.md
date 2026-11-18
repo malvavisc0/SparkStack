@@ -1,6 +1,13 @@
-# Service guides
+# Documentation
 
-Each guide covers one service: request shape, a Python client where it helps, measured timings and the defaults that work on the Spark. Start with the [main README](../README.md) for setup and monitoring.
+Start with the [main README](../README.md) for the overview, install steps and
+endpoint map. Each service guide below covers request shape, a Python client
+where it helps, measured timings and the defaults that work on the Spark.
+
+Examples use `spark` as the Spark's LAN hostname or IP. Replace it with your
+address; `./sparkstack.sh server` prints it.
+
+## Service guides
 
 | Service | Port | Guide | Client |
 |---|---|---|---|
@@ -13,6 +20,20 @@ Each guide covers one service: request shape, a Python client where it helps, me
 | Text to speech | `:9192` | [text-to-speech-api.md](text-to-speech-api.md) | [tts_client.py](../scripts/tts_client.py) |
 | Metrics and dashboards | `:9199`, `:9200` | [metrics.md](metrics.md) | n/a |
 
-The clients use only the Python standard library and share helpers from [client_support.py](../scripts/client_support.py). They need Python 3.10 or newer.
+The clients use only the Python standard library and share helpers from
+[client_support.py](../scripts/client_support.py). They need Python 3.10 or
+newer.
 
-The image client always expands prompts through the chat model before rendering. The other clients send requests as written.
+The image client always expands prompts through the chat model before rendering.
+The other clients send requests as written.
+
+## Operations and reference
+
+- [models.md](models.md) — full model table, licenses, hardware budget, storage
+  layout and download groups.
+- [operations.md](operations.md) — commands, profiles, startup and cache notes,
+  watchdog setup and troubleshooting.
+- [security.md](security.md) — exposure, authentication and the Dozzle/Grafana
+  trust boundary.
+- [metrics.md](metrics.md) — Prometheus, Grafana, node-exporter and the GPU
+  collector.

@@ -43,7 +43,7 @@ transcript, `--json` for the raw response, and `--out transcript.json` to save i
 ## Request
 
 ```bash
-curl http://192.168.1.10:9191/transcribe \
+curl http://spark:9191/transcribe \
   -F file=@two_speakers.wav \
   -F language=en
 ```
