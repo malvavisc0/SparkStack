@@ -39,6 +39,22 @@ It prints the output path, the image dimensions and the time the job took. Add
 the only place `sd-server` reads it. Individual pixels can still differ between
 runs because the GPU kernels are not bit-exact, so compare images visually.
 
+## Gallery
+
+Four renders from this service at the default 1024x1024 and 24 steps, with
+prompt expansion off so each caption was sent exactly as written.
+
+<table>
+  <tr>
+    <td><img src="gallery/feel.jpg" alt="A rain-streaked window over a desk with a lamp, open notebook and blanket" width="420"><br><em>feel — rain on the window, a working lamp, a blanket left on the chair.</em></td>
+    <td><img src="gallery/desire.jpg" alt="A tall library at night with a lit window high above a spiral staircase" width="420"><br><em>desire — a lit window at the top of an old library, reachable only by the stairs.</em></td>
+  </tr>
+  <tr>
+    <td><img src="gallery/fear.jpg" alt="A cold room of empty white shelves with books scattered face-down on the floor" width="420"><br><em>fear — empty shelves in a cold room, every book face-down on the floor.</em></td>
+    <td><img src="gallery/enjoy.jpg" alt="A sunlit workshop with a brass orrery, tea and a sleeping ginger cat" width="420"><br><em>enjoy — a brass orrery half-built in afternoon sun, tea still warm, cat asleep.</em></td>
+  </tr>
+</table>
+
 ## Prompt expansion
 
 The model expects a full scene caption. The client sends the request through the
